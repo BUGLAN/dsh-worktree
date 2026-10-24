@@ -106,20 +106,22 @@ function parseSessionId(value) {
 /** `request: { sessionId, branch, allowDirty? }` — switch the session checkout. */
 function parseSwitchRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const allowDirty = optionalBoolean(value.allowDirty, 'request.allowDirty');
   return {
     sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
     branch: nonEmptyString(value.branch, 'request.branch'),
-    allowDirty: optionalBoolean(value.allowDirty, 'request.allowDirty'),
+    ...(allowDirty === undefined ? {} : { allowDirty }),
   };
 }
 
-/** `request: { sessionId, name, from? }` — create a branch and its worktree. */
+/** `request: { sessionId, name, startPoint? }` — create a branch and its worktree. */
 function parseCreateRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const startPoint = optionalString(value.startPoint, 'request.startPoint');
   return {
     sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
     name: nonEmptyString(value.name, 'request.name'),
-    startPoint: optionalString(value.startPoint, 'request.startPoint'),
+    ...(startPoint === undefined || startPoint === null ? {} : { startPoint }),
   };
 }
 
@@ -135,10 +137,11 @@ function parseEnterRequest(value) {
 /** `request: { sessionId, path, force? }` — remove one pool worktree. */
 function parseRemoveRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const force = optionalBoolean(value.force, 'request.force');
   return {
     sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
     path: nonEmptyString(value.path, 'request.path'),
-    force: optionalBoolean(value.force, 'request.force'),
+    ...(force === undefined ? {} : { force }),
   };
 }
 

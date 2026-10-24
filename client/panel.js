@@ -14,6 +14,7 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
   useEffect(() => {
     if (!open) return;
     let raf = 0;
+    let settled = false;
     const update = () => {
       const anchor = anchorRef.current;
       const panel = panelRef.current;
@@ -27,9 +28,13 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
       left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - width - 8));
       panel.style.top = `${Math.round(top)}px`;
       panel.style.left = `${Math.round(left)}px`;
-      panel.style.visibility = '';
+      if (settled === false && height > 0) {
+        settled = true;
+        panel.style.visibility = '';
+      }
     };
-    if (panelRef.current !== null) panelRef.current.style.visibility = 'hidden';
+    const panel = panelRef.current;
+    if (panel !== null) panel.style.visibility = 'hidden';
     update();
     raf = requestAnimationFrame(update);
     window.addEventListener('resize', update);
@@ -323,7 +328,6 @@ function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t,
     role: 'dialog',
     'aria-label': t('panel.currentSection'),
     'data-testid': 'dsh-worktree-panel',
-    style: { visibility: 'hidden' },
     children: [
       jsxs('div', {
         className: 'dsh-wt-panel-search',

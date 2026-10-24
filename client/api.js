@@ -11,13 +11,20 @@
  * @returns the API surface used by panels and decorations.
  */
 export function createWorktreeApi(ctx) {
-  const remote = ctx.remote.worktree;
+  /** The namespace service exists after `$mount` settles; resolve it lazily. */
+  let namespace = null;
+  const remoteOf = () => {
+    if (namespace === null) {
+      namespace = ctx.get('remote.worktree');
+      if (namespace === undefined) throw new Error('dsh-worktree: the worktree Remote namespace is not mounted');
+    }
+    return namespace;
+  };
   const workspaces = ctx.workspaces;
   const sessions = ctx.sessions;
   const uiWorkspace = ctx.uiWorkspace;
-
   const call = async (method, ...args) => {
-    const result = await remote[method](...args);
+    const result = await remoteOf()[method](...args);
     if (!result.ok) throw new Error(result.error.message);
     return result.value;
   };
