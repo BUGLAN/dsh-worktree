@@ -10,7 +10,7 @@
  * @module dsh-worktree/test/smoke
  */
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
@@ -332,6 +332,26 @@ try {
   const lineageAfter = await restartedLineage.status('s1');
   check('lineage: record survives restart', lineageAfter.branches.find((entry) => entry.name === 'task-1')?.origin === worktreePath);
   restartedLineage.dispose();
+
+  // --- reading prunes dead lineage records ---------------------------------
+  // A branch deleted outside the plugin must not haunt the map: the next read
+  // drops its record in one batch and persists the cleaned map.
+  await git(repo, 'branch', '-D', 'inplace-1');
+  service.invalidateCheckouts();
+  value = await service.status('s1');
+  check('lineage: deleted branch gone from list', value.branches.every((entry) => entry.name !== 'inplace-1'));
+  const rawLineage = JSON.parse(await readFile(join(pool, '.branches.json'), 'utf8'));
+  const persistedRepo = Object.values(rawLineage.repos ?? {}).find((entries) => entries['task-1'] !== undefined);
+  check('lineage: prune persisted to disk', persistedRepo !== undefined && persistedRepo['inplace-1'] === undefined, JSON.stringify(persistedRepo));
+
+  // --- a session record pointing at a removed checkout errors ---------------
+  // No silent fallback: the user deleted the worktree, so the status says so.
+  makeSession('s5', repo);
+  sessions.delete('s5');
+  coldSessions.set('s5', repo);
+  await service.rememberSessionCheckout('s5', join(root, 'gone-wt'));
+  value = await service.status('s5');
+  check('status: missing recorded checkout errors', value.ok === false && value.code === 'recorded-checkout-missing', JSON.stringify(value).slice(0, 160));
 
   // --- worktree identity: main checkout is never a worktree --------------
   value = await service.gitInfo([repo, worktreePath]);

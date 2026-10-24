@@ -691,7 +691,23 @@ export class WorktreeService {
     if (agent !== undefined) return { agent, cwd: this.cwdOf(agent) };
     await this.loadSessionCheckouts(signal);
     const recorded = this.sessionCheckouts.get(sessionId);
-    if (typeof recorded === 'string' && recorded.length > 0) return { cwd: recorded };
+    if (typeof recorded === 'string' && recorded.length > 0) {
+      // A record pointing at a removed checkout is an error to surface, not a
+      // state to paper over with a fallback: the user deleted the worktree out
+      // from under the session, and the picker must say so. A live Agent still
+      // wins above, so an open session keeps working where it runs.
+      try {
+        const info = await this.ctx.fs.stat(await this.ctx.fs.resolve(recorded, { signal }), signal);
+        if (info?.type === 'directory') return { cwd: recorded };
+      } catch {
+        /* Missing or unreadable: report below instead of guessing. */
+      }
+      return failure('recorded-checkout-missing', `This session's recorded worktree ${recorded} no longer exists.`, {
+        sessionId,
+        path: recorded,
+        hint: 'The checkout was removed outside the plugin. Clear the record in the pool .sessions.json, or open the session so its agent runs where it is.',
+      });
+    }
     const cwd = await this.coldCwdOf(sessionId, signal);
     if (cwd === undefined) {
       return failure('session-unavailable', 'This session has no readable working directory yet; open it once and retry.', { sessionId });
@@ -911,6 +927,37 @@ export class WorktreeService {
     const repoKey = worktrees[0]?.path ?? state.repositoryRoot;
     const lineageRepo = this.branchLineage.get(repoKey)
       ?? [...this.branchLineage.entries()].find(([key]) => samePath(key, repoKey))?.[1];
+    // Reading is also the cleaner: records whose branch no longer exists or
+    // whose birth place has vanished (manual branch/worktree cleanup outside
+    // the plugin) are dropped in one batch and persisted once, so the map
+    // never accumulates the dead weight of history.
+    if (lineageRepo !== undefined && lineageRepo.size > 0) {
+      const headNames = new Set(heads.map((entry) => entry.name));
+      const originAlive = new Map();
+      let pruned = false;
+      for (const [branchName, origin] of [...lineageRepo]) {
+        if (headNames.has(branchName) !== true) {
+          lineageRepo.delete(branchName);
+          pruned = true;
+          continue;
+        }
+        let alive = originAlive.get(origin);
+        if (alive === undefined) {
+          try {
+            const info = await this.ctx.fs.stat(await this.ctx.fs.resolve(origin, { signal: bound }), bound);
+            alive = info?.type === 'directory';
+          } catch {
+            alive = false;
+          }
+          originAlive.set(origin, alive);
+        }
+        if (alive !== true) {
+          lineageRepo.delete(branchName);
+          pruned = true;
+        }
+      }
+      if (pruned === true) await this.saveBranchLineage();
+    }
     const branches = heads.map((entry) => ({
       name: entry.name,
       kind: 'local',

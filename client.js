@@ -258,6 +258,8 @@ const en = {
   'confirm.dirtyCreate.body': "This working tree has {n} uncommitted change(s). Branch {branch} keeps them as uncommitted work.",
   'confirm.dirtyCreate.proceed': "Create anyway",
   'trigger.branch': 'Branch',
+  'trigger.missing': 'Missing worktree',
+  'panel.checkoutMissing': "This session's recorded worktree {path} no longer exists (removed outside the plugin).",
   'trigger.detached': 'Detached',
   'trigger.loading': 'Reading repository…',
   'panel.searchPlaceholder': 'Search branches…',
@@ -344,6 +346,8 @@ const zh = {
   'confirm.dirtyCreate.body': "当前工作区有 {n} 个未提交更改。分支 {branch} 会把这些更改作为未提交内容保留。",
   'confirm.dirtyCreate.proceed': "仍然创建",
   'trigger.branch': '分支',
+  'trigger.missing': '工作树缺失',
+  'panel.checkoutMissing': '该会话记录的工作树 {path} 已不存在（在插件之外被移除）。',
   'trigger.detached': '分离头指针',
   'trigger.loading': '正在读取仓库…',
   'panel.searchPlaceholder': '搜索分支…',
@@ -1235,7 +1239,11 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
   if (loading === true && status === undefined) {
     return jsx('span', { className: 'dsh-wt-trigger-placeholder', 'aria-hidden': 'true' });
   }
-  if (status?.isRepo !== true) return null;
+  // A session whose recorded worktree was deleted outside the plugin keeps its
+  // entry point: the trigger says the checkout is missing and the panel names
+  // the path, instead of silently hiding or falling back somewhere else.
+  const missingCheckout = status?.code === 'recorded-checkout-missing';
+  if (status?.isRepo !== true && missingCheckout !== true) return null;
 
   const variant = status.isWorktree === true ? 'worktree' : 'branch';
   // A worktree reads as `<directory>/<branch>` so the trigger names both the
@@ -1243,9 +1251,11 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const worktreeLabel = status.isWorktree === true
     ? [status.worktreeName, status.branch].filter((part) => typeof part === 'string' && part.length > 0).join('/')
     : '';
-  const label = status.isWorktree === true
-    ? (worktreeLabel.length > 0 ? worktreeLabel : (status.branch ?? ''))
-    : (status.branch ?? t('trigger.detached'));
+  const label = missingCheckout === true
+    ? t('trigger.missing')
+    : (status.isWorktree === true
+      ? (worktreeLabel.length > 0 ? worktreeLabel : (status.branch ?? ''))
+      : (status.branch ?? t('trigger.detached')));
 
   return jsxs(Fragment, {
     children: [
@@ -1261,9 +1271,11 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
         onClick: () => {
           setOpen((value) => !value);
         },
-        title: status.isWorktree === true
-          ? t('sidebar.worktreeTitle', { name: status.worktreeName ?? '', branch: status.branch ?? '' })
-          : t('sidebar.branchTitle', { branch: status.branch ?? t('trigger.detached') }),
+        title: missingCheckout === true
+          ? t('panel.checkoutMissing', { path: status?.path ?? '' })
+          : (status.isWorktree === true
+            ? t('sidebar.worktreeTitle', { name: status.worktreeName ?? '', branch: status.branch ?? '' })
+            : t('sidebar.branchTitle', { branch: status.branch ?? t('trigger.detached') })),
         children: [
           jsx('span', { className: 'dsh-wt-trigger-icon', children: variant === 'worktree' ? jsx(WorktreeIcon, {}) : jsx(BranchIcon, {}) }),
           jsx('span', { className: 'dsh-wt-trigger-label', children: label || t('trigger.loading') }),
@@ -1649,7 +1661,11 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
           status?.isRepo !== true && loading !== true && jsx('div', {
             className: 'dsh-wt-note',
             'data-testid': 'dsh-worktree-not-repo',
-            children: pending === true ? t('panel.sessionPending') : t('panel.notRepo'),
+            children: pending === true
+              ? t('panel.sessionPending')
+              : (status?.code === 'recorded-checkout-missing'
+                ? t('panel.checkoutMissing', { path: status?.path ?? '' })
+                : t('panel.notRepo')),
           }),
           confirm !== null && confirm.kind === 'dirty-create' && jsxs('div', {
             className: 'dsh-wt-confirm',
