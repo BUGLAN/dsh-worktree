@@ -55,12 +55,6 @@ export const CSS = `
 .dsh-wt-panel .dsh-wt-section-title::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--dsw-alias-border-l1),transparent)}
 .dsh-wt-panel .dsh-wt-section-title .dsh-wt-section-extra{margin-left:0;font-family:inherit;font-weight:400;text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;font-size:10px;opacity:.75}
 
-/* worktree form: the id prefix is painted inside the field, not beside it */
-.dsh-wt-panel .dsh-wt-create-field{display:flex;align-items:center;flex:1;min-width:0;height:28px;padding:0 8px 0 0;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);transition:border-color .12s ease,box-shadow .12s ease}
-.dsh-wt-panel .dsh-wt-create-field:focus-within{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary,#4d8dff) 18%,transparent)}
-.dsh-wt-panel .dsh-wt-create-field .dsh-wt-create-prefix{flex:none;padding:0 0 0 8px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap;user-select:none}
-.dsh-wt-panel .dsh-wt-create-field .dsh-wt-create-name{flex:1;min-width:0;height:26px;padding:0;border:none;background:transparent;box-shadow:none}
-.dsh-wt-panel .dsh-wt-create-field .dsh-wt-create-name:focus{border:none;box-shadow:none}
 /* branch rows: icon colour only; the label keeps full contrast */
 .dsh-wt-panel .dsh-wt-row[data-kind="worktree"] .dsh-wt-row-icon,.dsh-wt-panel .dsh-wt-row-icon[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
 

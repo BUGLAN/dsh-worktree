@@ -162,7 +162,18 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
   }, [worktree.api, sessionId]);
   useEffect(() => {
     void refresh();
-  }, [refresh, cwd]);
+  }, [refresh]);
+  // The framework's session summary keeps reporting the directory the session
+  // started in, even after the plugin moves it into a worktree, so it cannot
+  // drive a refresh. The store's session cache is the shared source of truth and
+  // is invalidated explicitly when this plugin changes a checkout.
+  useEffect(() => {
+    if (sessionId === undefined) return undefined;
+    return worktree.store.subscribe(() => {
+      const fresh = worktree.store.currentSessionOf(sessionId);
+      if (fresh !== undefined) setStatus(fresh);
+    });
+  }, [worktree.store, sessionId]);
 
   const variant = status?.isRepo && status.isWorktree ? 'worktree' : 'branch';
   // A worktree reads as `<directory>/<branch>` so the trigger names both the
@@ -358,7 +369,8 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     setConfirm(null);
     try {
       // Open the checkout inside the workspace this session already belongs to.
-      await api.openSessionInDirectory(path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
+      const opened = await api.openSessionInDirectory(path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
+      if (typeof opened === 'string') store.invalidateSession(opened);
       setToast(t('hint.sessionOpened', { name: baseName(path) }));
       onClose();
     } catch (cause) {
@@ -366,7 +378,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     } finally {
       setBusy(null);
     }
-  }, [api, fail, onClose, t, cwd, status]);
+  }, [api, fail, onClose, t, cwd, status, store]);
 
 
   const removeWorktree = useCallback(async (path, force = false) => {
@@ -431,7 +443,10 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
         fail(t('error.createFailed'), value);
         return false;
       }
-      await api.openSessionInDirectory(value.path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
+      const opened = await api.openSessionInDirectory(value.path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
+      // The new session now runs in the checkout; refresh its facts at once so the
+      // trigger shows `wt-xxxx/branch` without waiting for any other event.
+      if (typeof opened === 'string') store.invalidateSession(opened);
       afterMutation(t('create.worktreeOk', { branch: value.branch, path: value.path }));
       onClose();
       return true;
@@ -441,7 +456,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     } finally {
       setBusy(null);
     }
-  }, [api, sessionId, afterMutation, fail, onClose, t, cwd, status]);
+  }, [api, sessionId, afterMutation, fail, onClose, t, cwd, status, store]);
 
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
@@ -751,34 +766,22 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           }
         },
         children: [
-          // One field that reads as a single value: `wt-xxxx/` is a fixed prefix
-          // painted inside the input's own box, and the branch name is edited
-          // right after it. Two separate boxes made the directory look like a
-          // second, unrelated control.
-          jsxs('div', {
-            className: 'dsh-wt-create-field',
-            'data-mode': mode,
-            children: [
-              mode === 'worktree' && jsxs('span', {
-                className: 'dsh-wt-create-prefix',
-                title: t('create.prefixHint'),
-                children: [worktreeId, '/'],
-              }),
-              jsx('input', {
-                ref: nameRef,
-                id: 'dsh-wt-create-name',
-                className: 'dsh-wt-create-name',
-                type: 'text',
-                value: name,
-                placeholder: mode === 'worktree' ? t('create.worktreePlaceholder') : t('create.branchPlaceholder'),
-                'aria-label': title,
-                autoComplete: 'off',
-                spellCheck: false,
-                onChange: (event) => {
-                  setName(event.target.value);
-                },
-              }),
-            ],
+          // A plain field. The checkout directory id is generated when the form
+          // opens and is shown on the trigger afterwards, so repeating it here
+          // only crowded the input the user actually types into.
+          jsx('input', {
+            ref: nameRef,
+            id: 'dsh-wt-create-name',
+            className: 'dsh-wt-create-name',
+            type: 'text',
+            value: name,
+            placeholder: mode === 'worktree' ? t('create.worktreePlaceholder') : t('create.branchPlaceholder'),
+            'aria-label': title,
+            autoComplete: 'off',
+            spellCheck: false,
+            onChange: (event) => {
+              setName(event.target.value);
+            },
           }),
           jsxs('select', {
             id: 'dsh-wt-create-from',

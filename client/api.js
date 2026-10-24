@@ -245,6 +245,20 @@ export class GitInfoStore {
     return entry.value;
   }
 
+  /**
+   * Forget one session's facts and fetch them again.
+   *
+   * Needed after the plugin itself moves a session: the framework's session
+   * summary keeps reporting the old directory, so nothing would otherwise tell
+   * the trigger and the sidebar row that the checkout changed.
+   * @param sessionId - session whose facts are stale.
+   */
+  invalidateSession(sessionId) {
+    if (sessionId === undefined || sessionId === null || sessionId === '') return;
+    this.sessions.delete(sessionId);
+    this.requestSession(sessionId);
+  }
+
   /** Ask the plugin for one session's checkout facts, deduplicated and cached. */
   requestSession(sessionId) {
     const entry = this.sessions.get(sessionId);
