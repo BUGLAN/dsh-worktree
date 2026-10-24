@@ -365,7 +365,48 @@ export class WorktreeService {
     return this.checkoutsWritePending;
   }
 
-  /** Record that one session now works in `path`. */
+  /**
+   * A best-effort guess at whether a session has started any turn.
+   *
+   * The authoritative flag lives in the framework's session snapshot, which the
+   * Client already receives; this is only a fallback for a stale snapshot. The
+   * durable header does not carry `blank` directly, so it is derived from the turn
+   * count when available. `undefined` means "cannot tell", which callers must treat
+   * as "not blank": relocating a session that may hold work is the destructive
+   * mistake, so uncertainty resolves to refusal.
+   * @param {string} sessionId - session identity from the Client.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns true when no turn has run, otherwise false or undefined.
+   */
+  async sessionIsBlank(sessionId, signal) {
+    return this.cached(`blank:${sessionId}`, async () => {
+      const query = this.ctx.sessionQuery;
+      if (query === undefined || typeof query.observeSession !== 'function') return undefined;
+      let observed;
+      try {
+        observed = await query.observeSession(sessionId);
+        const header = observed?.header ?? {};
+        if (typeof header.blank === 'boolean') return header.blank;
+        const stats = header.stats ?? observed?.stats ?? {};
+        if (typeof stats.turns === 'number') return stats.turns === 0;
+        return undefined;
+      } catch {
+        return undefined;
+      } finally {
+        const dispose = observed?.[Symbol.dispose] ?? observed?.dispose;
+        if (typeof dispose === 'function') {
+          try {
+            dispose.call(observed);
+          } catch {
+            /* disposal is best effort */
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * Record that one session now works in `path`. */
   async rememberSessionCheckout(sessionId, path) {
     await this.loadSessionCheckouts(undefined);
     this.sessionCheckouts.set(sessionId, path);
@@ -799,6 +840,10 @@ export class WorktreeService {
       ahead: status.ahead,
       behind: status.behind,
       dirtyCount: status.dirtyCount,
+      // Whether this session has started any turn. The Client needs it to decide
+      // if the session may still be relocated into another checkout, and the
+      // framework snapshot is not guaranteed to carry the flag.
+      blank: await this.sessionIsBlank(sessionId, bound),
       ...facts,
       branches,
       worktrees: poolEntries,

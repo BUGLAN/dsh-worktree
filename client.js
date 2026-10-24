@@ -241,6 +241,8 @@ function endpointOf(name) {
  */
 
 const en = {
+  'row.moveTo': "Move to {name}",
+  'hint.relocated': "Moved to {name} · {branch}",
   'create.prefixHint': "Checkout directory created for this worktree",
   'create.previewHint': "Branch name as stored: slashes become dashes in the label",
   'create.branchPlaceholder': "New branch name, e.g. feature/login",
@@ -332,6 +334,8 @@ const en = {
 };
 
 const zh = {
+  'row.moveTo': "迁移到 {name}",
+  'hint.relocated': "已迁移到 {name} · {branch}",
   'create.prefixHint': "此工作树的检出目录",
   'create.previewHint': "分支名中的斜杠在显示时转为短横线",
   'create.branchPlaceholder': "新分支名，例如 feature/login",
@@ -1179,6 +1183,9 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const cwd = typeof useSessions === 'function'
     ? useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd)
     : undefined;
+  const sessionBlank = typeof useSessions === 'function'
+    ? useSessions((snapshot) => snapshot?.byId?.[sessionId]?.blank)
+    : undefined;
   const [status, setStatus] = useState(undefined);
   const [loading, setLoading] = useState(true);
   const refresh = useCallback(async () => {
@@ -1281,6 +1288,10 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
           status,
           loading,
           cwd,
+          // Read here, not inside the panel: the panel renders through a portal and
+          // has no framework hook injection, so a `useSessions` call there silently
+          // returns nothing.
+          sessionBlank,
           api: worktree.api,
           store: worktree.store,
           t,
@@ -1296,7 +1307,7 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
 /**
  * The panel body: search, current status, worktrees, branches, create form.
  */
-function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api, store, t, refresh, onClose }) {
+function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sessionBlank, api, store, t, refresh, onClose }) {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(null);
   const [confirm, setConfirm] = useState(null);
@@ -1420,6 +1431,47 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     }
   }, [api, sessionId, afterMutation, fail, t]);
 
+  /**
+   * Move a pristine session into the checkout that holds `branch`, then switch
+   * to that branch there.
+   *
+   * Picking `wt-1a2b/feat-x` from the picker means "work on feat-x", and that
+   * branch is only checked out inside `wt-1a2b`. The directory therefore follows
+   * the branch: moving the session is the operation, and the switch is a no-op
+   * confirmation because the target checkout already has it checked out.
+   * @param branch - branch entry from the picker, with its owning worktree.
+   */
+  const relocateTo = useCallback(async (branch) => {
+    const target = branch?.worktree?.path;
+    if (typeof target !== 'string' || target.length === 0) {
+      // No owning worktree means the branch lives in this checkout after all.
+      await switchTo(branch.name);
+      return;
+    }
+    setBusy({ kind: 'relocate', branch: branch.name, path: target });
+    setError(null);
+    setConfirm(null);
+    try {
+      const value = await api.enterWorktree({ sessionId, path: target });
+      if (value.ok !== true) {
+        if (value.code === 'session-unavailable') {
+          fail(t('error.switchFailed'), { message: t('error.sessionUnavailable') });
+        } else {
+          fail(t('error.switchFailed'), value);
+        }
+        return;
+      }
+      // The directory changed: refresh this session's facts immediately so the
+      // trigger and the row mark show the new worktree without waiting.
+      store.invalidateSession(sessionId);
+      afterMutation(t('hint.relocated', { name: baseName(target), branch: branch.name }));
+    } catch (cause) {
+      fail(t('error.switchFailed'), { message: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setBusy(null);
+    }
+  }, [api, sessionId, afterMutation, fail, store, t, switchTo]);
+
   const openDirectory = useCallback(async (path) => {
     setBusy({ kind: 'open', path });
     setError(null);
@@ -1516,6 +1568,14 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
   }, [api, sessionId, afterMutation, fail, onClose, t, cwd, status, store]);
 
   const normalized = query.trim().toLowerCase();
+  // Only a session that has not started any turn may be relocated: once there is
+  // work in it, its directory is part of its identity.
+  //
+  // `blank` comes from the framework snapshot, which reaches this component as a
+  // prop because the panel itself renders through a portal and cannot call the
+  // framework hook. The Host's own `blank` is the fallback for a stale snapshot.
+  const relocatable = status?.isRepo === true
+    && (sessionBlank === true || (sessionBlank === undefined && status.blank === true));
   const branches = useMemo(() => {
     // Which branches are checked out in a pool worktree, keyed by branch name.
     // A worktree row and a plain branch row share the same list, so the icon and
@@ -1524,19 +1584,21 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     for (const entry of status?.worktrees ?? []) {
       if (typeof entry.branch === 'string' && entry.inPool === true) byWorktree.set(entry.branch, entry);
     }
-    // The picker lists the branches this checkout can switch to. A branch that
-    // another worktree already holds carries an `occupiedPath` from the Host and
-    // is not switchable here, so it is left out — showing it would only offer an
-    // action that gets refused. This is presentation logic and lives here alone.
+    // Two audiences, one list:
+    //  - a pristine session may move anywhere, so every local branch is offered
+    //    and picking one from a pool checkout relocates the session with it;
+    //  - a session with work in it stays where it is, so only branches this
+    //    checkout can actually switch to are shown.
     const locals = (status?.branches ?? [])
-      .filter((branch) => branch.kind === 'local' && branch.occupiedPath == null)
+      .filter((branch) => branch.kind === 'local')
+      .filter((branch) => relocatable || branch.occupiedPath == null)
       .map((branch) => ({ ...branch, worktree: byWorktree.get(branch.name) ?? null }));
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
       locals: locals.filter(match),
       localsHidden: locals.length - locals.filter(match).length,
     };
-  }, [status, normalized]);
+  }, [status, normalized, relocatable]);
 
   const currentDirty = status?.dirtyCount ?? null;
 
@@ -1667,7 +1729,10 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                 className: 'dsh-wt-section',
                 children: branches.locals.map((branch, index) => {
                 const isCurrent = branch.current === true;
-                const busyRow = busy !== null && busy.kind === 'switch' && busy.branch === branch.name;
+                const busyRow = busy !== null && (busy.kind === 'switch' || busy.kind === 'relocate') && (busy.branch === branch.name || busy.path === branch.worktree?.path);
+                // A branch held by another checkout is reached by moving there,
+                // not by switching in place; the row's own worktree tells which.
+                const isElsewhere = branch.occupiedPath != null || (branch.worktree !== null && branch.worktree.isCurrent !== true);
                 return jsxs('button', {
                   type: 'button',
                   className: 'dsh-wt-row',
@@ -1677,10 +1742,15 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                   // than a greyed-out row.
                   'aria-disabled': isCurrent === true ? 'true' : undefined,
                   'data-current': isCurrent === true ? 'true' : undefined,
+                  'data-kind': isElsewhere === true ? 'elsewhere' : undefined,
                   style: { animationDelay: `${String(Math.min(index, 8) * 14)}ms` },
                   'data-testid': `dsh-worktree-branch-${branch.name}`,
                   onClick: () => {
                     if (isCurrent === true) return;
+                    if (isElsewhere === true) {
+                      void relocateTo(branch);
+                      return;
+                    }
                     void switchTo(branch.name);
                   },
                   children: [
@@ -1708,7 +1778,9 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                         }),
                         isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
                           ? jsx('span', { className: 'dsh-wt-row-sub', 'data-tone': 'warn', children: dirtyLabel(t, currentDirty) })
-                          : null,
+                          : isElsewhere === true
+                            ? jsx('span', { className: 'dsh-wt-row-sub', children: t('row.moveTo', { name: baseName(branch.worktree?.path ?? branch.occupiedPath ?? '') }) })
+                            : null,
                       ],
                     }),
                     isCurrent === true && jsx('span', { className: 'dsh-wt-row-check', children: jsx(CheckIcon, { size: 14 }) }),
