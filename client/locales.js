@@ -7,7 +7,6 @@
 export const en = {
   'create.branchPlaceholder': "New branch name, e.g. feature/login",
   'create.worktreePlaceholder': "Worktree branch name",
-  'create.openSessionShort': "open",
   'create.branchAction': "Branch",
   'create.worktreeAction': "Permanent worktree",
   'create.branchTitle': "Create and check out a branch here",
@@ -53,7 +52,6 @@ export const en = {
   'create.namePlaceholder': 'Branch name, e.g. feature/login',
   'create.from': 'Start from',
   'create.fromHead': 'Current HEAD',
-  'create.openSession': 'Open in a new session (parallel task)',
   'create.submit': 'Create',
   'create.creating': 'Creating…',
   'create.ok': 'Created {branch} at {path}',
@@ -99,7 +97,6 @@ export const en = {
 export const zh = {
   'create.branchPlaceholder': "新分支名，例如 feature/login",
   'create.worktreePlaceholder': "工作树分支名",
-  'create.openSessionShort': "打开",
   'create.branchAction': "分支",
   'create.worktreeAction': "永久工作树",
   'create.branchTitle': "在当前检出创建并迁出分支",
@@ -145,7 +142,6 @@ export const zh = {
   'create.namePlaceholder': '分支名，例如 feature/login',
   'create.from': '起点',
   'create.fromHead': '当前 HEAD',
-  'create.openSession': '在新会话中打开（并行任务）',
   'create.submit': '创建',
   'create.creating': '创建中…',
   'create.ok': '已创建 {branch}，位于 {path}',

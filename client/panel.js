@@ -342,23 +342,6 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     }
   }, [api, fail, onClose, t]);
 
-  const enterDirectory = useCallback(async (path) => {
-    setBusy({ kind: 'enter', path });
-    setError(null);
-    try {
-      const value = await api.enterWorktree({ sessionId, path });
-      if (value.ok === true) {
-        afterMutation(t('hint.enterDone', { path: value.cwd ?? path }));
-        onClose();
-      } else {
-        fail(t('error.unexpected'), value);
-      }
-    } catch (cause) {
-      fail(t('error.unexpected'), { message: cause instanceof Error ? cause.message : String(cause) });
-    } finally {
-      setBusy(null);
-    }
-  }, [api, sessionId, afterMutation, fail, onClose, t]);
 
   const removeWorktree = useCallback(async (path, force = false) => {
     setBusy({ kind: 'remove', path });
@@ -404,8 +387,16 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     }
   }, [api, sessionId, afterMutation, fail, t]);
 
-  /** Atomic action 2: create a linked checkout under the pool, leaving this one untouched. */
-  const createWorktreeBranch = useCallback(async ({ name, startPoint, openSession }) => {
+  /**
+   * Atomic action 2: create a linked checkout under the pool, leaving this one
+   * untouched, then continue in a new session pointed at it.
+   *
+   * Always opening a session is the whole point of a permanent worktree: it is
+   * how two tasks run side by side. It is also the only non-destructive path —
+   * moving the *current* session into the checkout would take the working
+   * context away from under the user.
+   */
+  const createWorktreeBranch = useCallback(async ({ name, startPoint }) => {
     setBusy({ kind: 'worktree', name });
     setError(null);
     try {
@@ -414,13 +405,9 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
         fail(t('error.createFailed'), value);
         return false;
       }
+      await api.openSessionInDirectory(value.path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
       afterMutation(t('create.worktreeOk', { branch: value.branch, path: value.path }));
-      if (openSession === false) {
-        await enterDirectory(value.path);
-      } else {
-        await api.openSessionInDirectory(value.path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
-        onClose();
-      }
+      onClose();
       return true;
     } catch (cause) {
       fail(t('error.createFailed'), { message: cause instanceof Error ? cause.message : String(cause) });
@@ -428,7 +415,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     } finally {
       setBusy(null);
     }
-  }, [api, sessionId, afterMutation, enterDirectory, fail, onClose, t]);
+  }, [api, sessionId, afterMutation, fail, onClose, t, cwd, status]);
 
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
@@ -634,7 +621,6 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
 function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktreeBranch, t }) {
   const [name, setName] = useState('');
   const [startPoint, setStartPoint] = useState('');
-  const [openSession, setOpenSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const nameRef = useRef(null);
   useEffect(() => {
@@ -693,7 +679,7 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           if (name.trim().length === 0 || submitting === true) return;
           setSubmitting(true);
           try {
-            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint, openSession });
+            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint });
             if (done === true) {
               setName('');
               setStartPoint('');
@@ -738,20 +724,6 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
             children: [
               jsx('option', { value: '', children: t('create.fromHead') }),
               ...options.locals.map((value) => jsx('option', { value, children: value }, `local:${value}`)),
-            ],
-          }),
-          mode === 'worktree' && jsx('label', {
-            className: 'dsh-wt-create-open',
-            title: t('create.openSession'),
-            children: [
-              jsx('input', {
-                type: 'checkbox',
-                checked: openSession,
-                onChange: (event) => {
-                  setOpenSession(event.target.checked);
-                },
-              }),
-              jsx('span', { children: t('create.openSessionShort') }),
             ],
           }),
           jsxs('button', {

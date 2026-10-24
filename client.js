@@ -241,7 +241,6 @@ function endpointOf(name) {
 const en = {
   'create.branchPlaceholder': "New branch name, e.g. feature/login",
   'create.worktreePlaceholder': "Worktree branch name",
-  'create.openSessionShort': "open",
   'create.branchAction': "Branch",
   'create.worktreeAction': "Permanent worktree",
   'create.branchTitle': "Create and check out a branch here",
@@ -287,7 +286,6 @@ const en = {
   'create.namePlaceholder': 'Branch name, e.g. feature/login',
   'create.from': 'Start from',
   'create.fromHead': 'Current HEAD',
-  'create.openSession': 'Open in a new session (parallel task)',
   'create.submit': 'Create',
   'create.creating': 'Creating…',
   'create.ok': 'Created {branch} at {path}',
@@ -333,7 +331,6 @@ const en = {
 const zh = {
   'create.branchPlaceholder': "新分支名，例如 feature/login",
   'create.worktreePlaceholder': "工作树分支名",
-  'create.openSessionShort': "打开",
   'create.branchAction': "分支",
   'create.worktreeAction': "永久工作树",
   'create.branchTitle': "在当前检出创建并迁出分支",
@@ -379,7 +376,6 @@ const zh = {
   'create.namePlaceholder': '分支名，例如 feature/login',
   'create.from': '起点',
   'create.fromHead': '当前 HEAD',
-  'create.openSession': '在新会话中打开（并行任务）',
   'create.submit': '创建',
   'create.creating': '创建中…',
   'create.ok': '已创建 {branch}，位于 {path}',
@@ -520,8 +516,6 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-create-form input[type=text]:focus{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary,#4d8dff) 18%,transparent)}
 .dsh-wt-panel .dsh-wt-create-form select{flex:none;width:96px;height:28px;padding:0 4px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;line-height:18px;outline:none}
 .dsh-wt-panel .dsh-wt-create-form select:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
-.dsh-wt-panel .dsh-wt-create-open{display:inline-flex;align-items:center;gap:4px;flex:none;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;cursor:pointer;user-select:none;white-space:nowrap}
-.dsh-wt-panel .dsh-wt-create-open input{margin:0;width:12px;height:12px;accent-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
 .dsh-wt-panel .dsh-wt-create-form .dsh-wt-button{flex:none;height:28px;padding:0 10px}
 .dsh-wt-panel .dsh-wt-button{display:inline-flex;align-items:center;gap:5px;height:27px;padding:0 11px;border:none;border-radius:6px;font-size:12.5px;font-weight:500;line-height:18px;cursor:pointer;transition:background .12s ease,filter .12s ease,transform .08s ease}
 .dsh-wt-panel .dsh-wt-button:active:not(:disabled){transform:translateY(.5px)}
@@ -1271,23 +1265,6 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     }
   }, [api, fail, onClose, t]);
 
-  const enterDirectory = useCallback(async (path) => {
-    setBusy({ kind: 'enter', path });
-    setError(null);
-    try {
-      const value = await api.enterWorktree({ sessionId, path });
-      if (value.ok === true) {
-        afterMutation(t('hint.enterDone', { path: value.cwd ?? path }));
-        onClose();
-      } else {
-        fail(t('error.unexpected'), value);
-      }
-    } catch (cause) {
-      fail(t('error.unexpected'), { message: cause instanceof Error ? cause.message : String(cause) });
-    } finally {
-      setBusy(null);
-    }
-  }, [api, sessionId, afterMutation, fail, onClose, t]);
 
   const removeWorktree = useCallback(async (path, force = false) => {
     setBusy({ kind: 'remove', path });
@@ -1333,8 +1310,16 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     }
   }, [api, sessionId, afterMutation, fail, t]);
 
-  /** Atomic action 2: create a linked checkout under the pool, leaving this one untouched. */
-  const createWorktreeBranch = useCallback(async ({ name, startPoint, openSession }) => {
+  /**
+   * Atomic action 2: create a linked checkout under the pool, leaving this one
+   * untouched, then continue in a new session pointed at it.
+   *
+   * Always opening a session is the whole point of a permanent worktree: it is
+   * how two tasks run side by side. It is also the only non-destructive path —
+   * moving the *current* session into the checkout would take the working
+   * context away from under the user.
+   */
+  const createWorktreeBranch = useCallback(async ({ name, startPoint }) => {
     setBusy({ kind: 'worktree', name });
     setError(null);
     try {
@@ -1343,13 +1328,9 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
         fail(t('error.createFailed'), value);
         return false;
       }
+      await api.openSessionInDirectory(value.path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
       afterMutation(t('create.worktreeOk', { branch: value.branch, path: value.path }));
-      if (openSession === false) {
-        await enterDirectory(value.path);
-      } else {
-        await api.openSessionInDirectory(value.path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
-        onClose();
-      }
+      onClose();
       return true;
     } catch (cause) {
       fail(t('error.createFailed'), { message: cause instanceof Error ? cause.message : String(cause) });
@@ -1357,7 +1338,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     } finally {
       setBusy(null);
     }
-  }, [api, sessionId, afterMutation, enterDirectory, fail, onClose, t]);
+  }, [api, sessionId, afterMutation, fail, onClose, t, cwd, status]);
 
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
@@ -1563,7 +1544,6 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
 function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktreeBranch, t }) {
   const [name, setName] = useState('');
   const [startPoint, setStartPoint] = useState('');
-  const [openSession, setOpenSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const nameRef = useRef(null);
   useEffect(() => {
@@ -1622,7 +1602,7 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           if (name.trim().length === 0 || submitting === true) return;
           setSubmitting(true);
           try {
-            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint, openSession });
+            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint });
             if (done === true) {
               setName('');
               setStartPoint('');
@@ -1667,20 +1647,6 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
             children: [
               jsx('option', { value: '', children: t('create.fromHead') }),
               ...options.locals.map((value) => jsx('option', { value, children: value }, `local:${value}`)),
-            ],
-          }),
-          mode === 'worktree' && jsx('label', {
-            className: 'dsh-wt-create-open',
-            title: t('create.openSession'),
-            children: [
-              jsx('input', {
-                type: 'checkbox',
-                checked: openSession,
-                onChange: (event) => {
-                  setOpenSession(event.target.checked);
-                },
-              }),
-              jsx('span', { children: t('create.openSessionShort') }),
             ],
           }),
           jsxs('button', {
