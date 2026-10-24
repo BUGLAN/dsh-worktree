@@ -52,6 +52,7 @@ export const CSS = `
 .dsh-wt-panel .dsh-wt-row-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .dsh-wt-panel .dsh-wt-row-sub{color:var(--dsw-alias-label-secondary);font-size:11px;line-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-wt-panel .dsh-wt-row-sub[data-tone="warn"]{color:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#b45309) 72%,var(--dsw-alias-label-primary,#0f1115))}
+.dsh-wt-panel .dsh-wt-row-here{flex:none;color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:15px;opacity:.9}
 .dsh-wt-panel .dsh-wt-row-check{display:inline-flex;flex:none;color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
 .dsh-wt-panel .dsh-wt-row-actions{display:inline-flex;flex:none;gap:0;opacity:0;transition:opacity .1s}
 .dsh-wt-panel .dsh-wt-row:hover .dsh-wt-row-actions,.dsh-wt-panel .dsh-wt-row:focus-within .dsh-wt-row-actions{opacity:1}

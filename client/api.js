@@ -45,6 +45,9 @@ export function createWorktreeApi(ctx) {
     /** Create one branch and its checkout under the pool. */
     createWorktree: (request) => call('createWorktree', request),
 
+    /** Create one worktree joined to the current workspace (no new workspace). */
+    createWorktreeSession: (request) => call('createWorktreeSession', request),
+
     /** Move one session into an existing checkout. */
     enterWorktree: (request) => call('enterWorktree', request),
 
@@ -52,24 +55,29 @@ export function createWorktreeApi(ctx) {
     removeWorktree: (request) => call('removeWorktree', request),
 
     /**
-     * Open (or reveal) a session working inside one directory.
+     * Open a session whose working directory is one worktree checkout.
      *
-     * The workspace for the directory is created idempotently; when it already
-     * holds live sessions the most recent one is revealed, otherwise a fresh
-     * session is created in it and becomes the main view.
+     * A worktree is a checkout of the *current* workspace, not a workspace of
+     * its own: this reveals an existing session already pointed at the
+     * directory, and otherwise creates a session with that `cwd` directly, so
+     * the sidebar keeps one workspace group instead of growing a group per
+     * worktree.
      * @param {string} path - checkout directory.
      * @returns the session id that was opened or revealed.
      */
     async openSessionInDirectory(path) {
-      const view = await workspaces.create({ path });
+      const list = sessions.list.getSnapshot();
       const registry = workspaces.list.getSnapshot();
       const archived = new Set(registry.archivedSessionIds ?? []);
-      const list = sessions.list.getSnapshot();
-      const members = (view.sessionIds ?? []).filter((id) => !archived.has(id));
+      const normalize = (value) => (typeof value === 'string' ? value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : '');
+      const target = normalize(path);
       let latest = null;
       let latestAt = -1;
-      for (const id of members) {
-        const updatedAt = list.byId?.[id]?.updatedAt;
+      for (const id of list.ids ?? []) {
+        const summary = list.byId?.[id];
+        if (summary === undefined || archived.has(id)) continue;
+        if (normalize(summary.cwd) !== target) continue;
+        const updatedAt = summary.updatedAt;
         if (typeof updatedAt === 'number' && updatedAt > latestAt) {
           latestAt = updatedAt;
           latest = id;
@@ -79,7 +87,11 @@ export function createWorktreeApi(ctx) {
         uiWorkspace.openSession(latest);
         return latest;
       }
-      await uiWorkspace.openWorkspace(view.workspaceId);
+      const created = await sessions.create({ cwd: path });
+      if (typeof created === 'string' && created.length > 0) {
+        uiWorkspace.openSession(created);
+        return created;
+      }
       return null;
     },
   };

@@ -354,19 +354,32 @@ export class WorktreeService {
    * @param {AbortSignal} signal - operation cancellation.
    * @returns repository facts, or `isRepo: false`.
    */
+  /**
+   * Identify the repository and worktree that own one directory.
+   *
+   * One `rev-parse` answers the root, the branch, and the shared git dir: a
+   * linked worktree reports a `gitdir` that differs from its `commondir` under
+   * `.git/worktrees/<name>`, which lets the panel tell a worktree from a plain
+   * checkout without a second process.
+   * @param {string} path - canonical checkout path.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns repository facts, or `isRepo: false`.
+   */
   async inspect(path, signal) {
     return this.cached(`inspect:${path}`, async () => {
       try {
-        const { stdout } = await this.git(path, ['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD'], { signal, allowedExitCodes: [0, 128] });
-        const [topLevelRaw = '', head = ''] = stdout.split('\n');
+        const { stdout } = await this.git(path, ['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--git-common-dir', '--git-dir'], { signal, allowedExitCodes: [0, 128] });
+        const [topLevelRaw = '', head = '', commonDir = '', gitDir = ''] = stdout.split('\n');
         if (topLevelRaw.trim().length === 0) return { path, isRepo: false };
         const repositoryRoot = await this.canonical(topLevelRaw.trim(), undefined, signal);
+        const linked = commonDir.trim().length > 0 && gitDir.trim().length > 0 && commonDir.trim() !== gitDir.trim();
         return {
           path,
           isRepo: true,
           repositoryRoot,
           branch: head.trim() === 'HEAD' || head.trim().length === 0 ? null : head.trim(),
           detached: head.trim() === 'HEAD',
+          linked,
         };
       } catch (error) {
         if (error instanceof GitCommandError && error.exitCode === 128) return { path, isRepo: false };
@@ -388,14 +401,22 @@ export class WorktreeService {
     });
   }
 
-  /** Changed-entry count of one checkout, `null` when it cannot be read. */
+  /**
+   * Changed-entry count of one checkout, `null` when it cannot be read.
+   *
+   * `git status` is the most expensive call the panel makes (it walks the whole
+   * working tree), so the answer is cached per checkout with a short TTL and
+   * shared between panel opens. Any mutation clears the cache.
+   */
   async dirtyCountOf(path, signal) {
-    try {
-      const { stdout } = await this.git(path, ['status', '--porcelain=v1', '--untracked-files=normal'], { signal });
-      return stdout.split('\n').filter((line) => line.length > 0).length;
-    } catch {
-      return null;
-    }
+    return this.cached(`dirty:${path}`, async () => {
+      try {
+        const { stdout } = await this.git(path, ['status', '--porcelain=v1', '--untracked-files=normal'], { signal });
+        return stdout.split('\n').filter((line) => line.length > 0).length;
+      } catch {
+        return null;
+      }
+    });
   }
 
   /**
@@ -406,16 +427,18 @@ export class WorktreeService {
    */
   worktreeFacts(state, worktrees) {
     const owner = worktrees.find((entry) => samePath(entry.path, state.path)) ?? worktrees.find((entry) => underPath(entry.path, state.path));
-    if (owner === undefined) return { isWorktree: false };
+    if (owner === undefined) {
+      // No worktree record: trust the git-dir/commondir split from `inspect`.
+      return state.linked === true ? { isWorktree: true, worktreePath: state.path, worktreeName: basename(state.path) } : { isWorktree: false };
+    }
     const isMain = samePath(owner.path, worktrees[0]?.path);
-    const facts = {
+    return {
       isWorktree: !isMain,
       worktreePath: owner.path,
       worktreeName: isMain ? null : basename(owner.path),
       worktreeBranch: owner.branch,
       worktreeDetached: owner.detached,
     };
-    return facts;
   }
 
   // --- Remote methods -----------------------------------------------------
@@ -491,14 +514,13 @@ export class WorktreeService {
         ...(state.error === undefined ? {} : { error: state.error }),
       };
     }
-    const [statusResult, worktrees, headsResult, remotesResult] = await Promise.all([
-      this.git(cwd, ['status', '--porcelain=v1', '--branch', '--untracked-files=normal'], { signal: bound }).catch((error) => {
+    const [statusResult, worktrees, headsResult] = await Promise.all([
+      this.cached(`status:${cwd}`, async () => this.git(cwd, ['status', '--porcelain=v1', '--branch', '--untracked-files=normal'], { signal: bound }).catch((error) => {
         if (error instanceof GitCommandError) return null;
         throw error;
-      }),
+      })),
       this.worktreeList(state.repositoryRoot, bound),
-      this.git(state.repositoryRoot, ['for-each-ref', '--format=%(refname:short)%09%(upstream:short)', 'refs/heads'], { signal: bound }),
-      this.git(state.repositoryRoot, ['for-each-ref', '--format=%(refname:short)', 'refs/remotes'], { signal: bound }),
+      this.cached(`heads:${state.repositoryRoot}`, async () => this.git(state.repositoryRoot, ['for-each-ref', '--format=%(refname:short)%09%(upstream:short)', 'refs/heads'], { signal: bound })),
     ]);
     const status = statusResult === null ? { branch: state.branch, upstream: null, ahead: 0, behind: 0, dirtyCount: null, detached: state.detached } : parseStatus(statusResult.stdout);
     const facts = this.worktreeFacts(state, worktrees);
@@ -511,22 +533,13 @@ export class WorktreeService {
         const [name = '', upstream = ''] = line.split('\t');
         return { name, upstream: upstream.length === 0 ? null : upstream };
       });
-    const localNames = new Set(heads.map((entry) => entry.name));
-    const remotes = remotesResult.stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && !line.endsWith('/HEAD'))
-      .map((name) => ({ name, hasLocal: localNames.has(name.slice(name.indexOf('/') + 1)) }));
-    const branches = [
-      ...heads.map((entry) => ({
-        name: entry.name,
-        kind: 'local',
-        current: entry.name === status.branch,
-        upstream: entry.upstream,
-        occupiedPath: worktrees.find((worktree) => worktree.branch === entry.name && !samePath(worktree.path, currentWorktreePath))?.path ?? null,
-      })),
-      ...remotes.map((entry) => ({ name: entry.name, kind: 'remote', current: false, hasLocal: entry.hasLocal })),
-    ];
+    const branches = heads.map((entry) => ({
+      name: entry.name,
+      kind: 'local',
+      current: entry.name === status.branch,
+      upstream: entry.upstream,
+      occupiedPath: worktrees.find((worktree) => worktree.branch === entry.name && !samePath(worktree.path, currentWorktreePath))?.path ?? null,
+    }));
     const poolEntries = worktrees.map((entry, index) => ({
       path: entry.path,
       name: basename(entry.path),
@@ -536,19 +549,14 @@ export class WorktreeService {
       isMain: index === 0,
       inPool: underPath(poolPath, entry.path),
       locked: entry.locked,
+      isCurrent: samePath(entry.path, currentWorktreePath),
     }));
-    const dirtyTargets = poolEntries.filter((entry) => entry.inPool || samePath(entry.path, currentWorktreePath));
-    const dirty = new Map();
-    const queue = [...dirtyTargets];
-    const worker = async () => {
-      while (queue.length > 0) {
-        const entry = queue.shift();
-        if (entry === undefined) return;
-        dirty.set(entry.path, await this.dirtyCountOf(entry.path, bound));
-      }
-    };
-    await Promise.all([worker(), worker(), worker()]);
-    for (const entry of poolEntries) if (dirty.has(entry.path)) entry.dirtyCount = dirty.get(entry.path);
+    // Dirty counts run in parallel and only for checkouts the panel shows.
+    const dirtyTargets = poolEntries.filter((entry) => entry.inPool || entry.isCurrent === true);
+    const dirtyResults = await Promise.all(dirtyTargets.map((entry) => this.dirtyCountOf(entry.path, bound)));
+    dirtyTargets.forEach((entry, index) => {
+      entry.dirtyCount = dirtyResults[index];
+    });
     return {
       ok: true,
       sessionId,
@@ -764,6 +772,21 @@ export class WorktreeService {
         hint: 'Any created checkout or branch is retained: inspect the directory, then remove it with "git worktree remove" if you want to retry.',
       });
     }
+  }
+
+  /**
+   * Create one worktree for this workspace and join a session to it.
+   *
+   * Unlike {@link createWorktree} this does not mint a Workspace per checkout:
+   * the checkout is an execution detail of the current working directory, so
+   * the caller keeps its workspace and only gains a directory it can move into.
+   * @param {object} request - session, branch name, start point, open mode.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns the created checkout, ready for the caller to enter.
+   */
+  async createWorktreeSession(request, signal) {
+    const bound = this.bind(signal);
+    return this.createWorktree({ sessionId: request.sessionId, name: request.name, ...(request.startPoint === undefined ? {} : { startPoint: request.startPoint }) }, bound);
   }
 
   /** Filter drivers configured in one checkout, for the checkout-free reset. */

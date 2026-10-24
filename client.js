@@ -153,6 +153,19 @@ function parseEnterRequest(value) {
   };
 }
 
+/** `request: { sessionId, name, startPoint?, openInSession? }` — worktree for this workspace. */
+function parseCreateSessionRequest(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const startPoint = optionalString(value.startPoint, 'request.startPoint');
+  const openInSession = optionalBoolean(value.openInSession, 'request.openInSession');
+  return {
+    sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
+    name: nonEmptyString(value.name, 'request.name'),
+    ...(startPoint === undefined || startPoint === null ? {} : { startPoint }),
+    ...(openInSession === undefined ? {} : { openInSession }),
+  };
+}
+
 /** `request: { sessionId, path, force? }` — remove one pool worktree. */
 function parseRemoveRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
@@ -198,6 +211,8 @@ const DESCRIPTORS = Object.freeze([
     resultCodec('SwitchBranchValue', 'switch outcome or a structured state that needs a user decision')),
   method('createWorktree', param('request', parseCreateRequest, 'session, new branch name, and optional start point'),
     resultCodec('CreateWorktreeValue', 'created worktree checkout under the pool, or a structured failure')),
+  method('createWorktreeSession', param('request', parseCreateSessionRequest, 'session, branch name, and optional start point'),
+    resultCodec('CreateWorktreeValue', 'a worktree joined to the current workspace, or a structured failure')),
   method('enterWorktree', param('request', parseEnterRequest, 'session that should move into an existing checkout'),
     resultCodec('EnterWorktreeValue', 'committed working directory after the move, or a structured failure')),
   method('removeWorktree', param('request', parseRemoveRequest, 'session, pool worktree path, and force consent'),
@@ -248,6 +263,7 @@ const en = {
   'status.worktreeOf': 'Worktree of {branch}',
   'status.mainCheckout': 'Main checkout',
   'row.current': 'Current',
+  'row.here': 'here',
   'row.occupied': 'Checked out in {name}',
   'row.hasLocal': 'Local branch exists',
   'row.openSession': 'Open session in this worktree',
@@ -325,6 +341,7 @@ const zh = {
   'status.worktreeOf': '分支 {branch} 的 worktree',
   'status.mainCheckout': '主检出',
   'row.current': '当前',
+  'row.here': '当前',
   'row.occupied': '检出位于 {name}',
   'row.hasLocal': '已有对应本地分支',
   'row.openSession': '在此 worktree 中打开会话',
@@ -433,6 +450,7 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-row-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .dsh-wt-panel .dsh-wt-row-sub{color:var(--dsw-alias-label-secondary);font-size:11px;line-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-wt-panel .dsh-wt-row-sub[data-tone="warn"]{color:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#b45309) 72%,var(--dsw-alias-label-primary,#0f1115))}
+.dsh-wt-panel .dsh-wt-row-here{flex:none;color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:15px;opacity:.9}
 .dsh-wt-panel .dsh-wt-row-check{display:inline-flex;flex:none;color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
 .dsh-wt-panel .dsh-wt-row-actions{display:inline-flex;flex:none;gap:0;opacity:0;transition:opacity .1s}
 .dsh-wt-panel .dsh-wt-row:hover .dsh-wt-row-actions,.dsh-wt-panel .dsh-wt-row:focus-within .dsh-wt-row-actions{opacity:1}
@@ -654,6 +672,9 @@ function createWorktreeApi(ctx) {
     /** Create one branch and its checkout under the pool. */
     createWorktree: (request) => call('createWorktree', request),
 
+    /** Create one worktree joined to the current workspace (no new workspace). */
+    createWorktreeSession: (request) => call('createWorktreeSession', request),
+
     /** Move one session into an existing checkout. */
     enterWorktree: (request) => call('enterWorktree', request),
 
@@ -661,24 +682,29 @@ function createWorktreeApi(ctx) {
     removeWorktree: (request) => call('removeWorktree', request),
 
     /**
-     * Open (or reveal) a session working inside one directory.
+     * Open a session whose working directory is one worktree checkout.
      *
-     * The workspace for the directory is created idempotently; when it already
-     * holds live sessions the most recent one is revealed, otherwise a fresh
-     * session is created in it and becomes the main view.
+     * A worktree is a checkout of the *current* workspace, not a workspace of
+     * its own: this reveals an existing session already pointed at the
+     * directory, and otherwise creates a session with that `cwd` directly, so
+     * the sidebar keeps one workspace group instead of growing a group per
+     * worktree.
      * @param {string} path - checkout directory.
      * @returns the session id that was opened or revealed.
      */
     async openSessionInDirectory(path) {
-      const view = await workspaces.create({ path });
+      const list = sessions.list.getSnapshot();
       const registry = workspaces.list.getSnapshot();
       const archived = new Set(registry.archivedSessionIds ?? []);
-      const list = sessions.list.getSnapshot();
-      const members = (view.sessionIds ?? []).filter((id) => !archived.has(id));
+      const normalize = (value) => (typeof value === 'string' ? value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : '');
+      const target = normalize(path);
       let latest = null;
       let latestAt = -1;
-      for (const id of members) {
-        const updatedAt = list.byId?.[id]?.updatedAt;
+      for (const id of list.ids ?? []) {
+        const summary = list.byId?.[id];
+        if (summary === undefined || archived.has(id)) continue;
+        if (normalize(summary.cwd) !== target) continue;
+        const updatedAt = summary.updatedAt;
         if (typeof updatedAt === 'number' && updatedAt > latestAt) {
           latestAt = updatedAt;
           latest = id;
@@ -688,7 +714,11 @@ function createWorktreeApi(ctx) {
         uiWorkspace.openSession(latest);
         return latest;
       }
-      await uiWorkspace.openWorkspace(view.workspaceId);
+      const created = await sessions.create({ cwd: path });
+      if (typeof created === 'string' && created.length > 0) {
+        uiWorkspace.openSession(created);
+        return created;
+      }
       return null;
     },
   };
@@ -1191,7 +1221,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     setBusy({ kind: 'create', name });
     setError(null);
     try {
-      const value = await api.createWorktree({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }) });
+      const value = await api.createWorktreeSession({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }) });
       if (value.ok !== true) {
         fail(t('error.createFailed'), value);
         return false;
@@ -1215,14 +1245,11 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
     const locals = (status?.branches ?? []).filter((branch) => branch.kind === 'local');
-    const remotes = (status?.branches ?? []).filter((branch) => branch.kind === 'remote' && branch.hasLocal !== true);
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
       worktrees: (status?.worktrees ?? []).filter((entry) => normalized === '' || (entry.branch ?? entry.name).toLowerCase().includes(normalized)),
       locals: locals.filter(match),
-      remotes: remotes.filter(match),
       localsHidden: locals.length - locals.filter(match).length,
-      remotesHidden: remotes.length - remotes.filter(match).length,
     };
   }, [status, normalized]);
 
@@ -1369,7 +1396,10 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                         void openDirectory(entry.path);
                       },
                       children: [
-                        jsx('span', { className: 'dsh-wt-row-icon', children: entry.isMain === true ? jsx(BranchIcon, {}) : jsx(WorktreeIcon, {}) }),
+                        jsx('span', {
+                          className: 'dsh-wt-row-icon',
+                          children: entry.isMain === true || entry.inPool !== true ? jsx(BranchIcon, {}) : jsx(WorktreeIcon, {}),
+                        }),
                         jsxs('span', {
                           className: 'dsh-wt-row-main',
                           children: [
@@ -1388,7 +1418,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                             }),
                           ],
                         }),
-                        isCurrent === true && jsx('span', { className: 'dsh-wt-row-check', children: jsx(CheckIcon, { size: 14 }) }),
+                        isCurrent === true && jsx('span', { className: 'dsh-wt-row-here', children: t('row.here') }),
                         jsxs('span', {
                           className: 'dsh-wt-row-actions',
                           children: [
@@ -1455,30 +1485,6 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                 }, branch.name);
               }),
               branches.locals.length === 0 && jsx('div', { className: 'dsh-wt-note', children: t('panel.noMatches') }),
-            ],
-          }),
-          status?.isRepo === true && jsxs('div', {
-            className: 'dsh-wt-section',
-            children: [
-              jsx('div', { className: 'dsh-wt-section-title', children: t('panel.remoteSection') }),
-              branches.remotes.map((branch) => jsx('button', {
-                type: 'button',
-                className: 'dsh-wt-row',
-                onClick: () => {
-                  void switchTo(branch.name);
-                },
-                children: [
-                  jsx('span', { className: 'dsh-wt-row-icon', children: jsx(RemoteBranchIcon, {}) }),
-                  jsxs('span', {
-                    className: 'dsh-wt-row-main',
-                    children: [
-                      jsx('span', { className: 'dsh-wt-row-title', children: jsx('span', { className: 'dsh-wt-row-name', children: branch.name }) }),
-                      jsx('span', { className: 'dsh-wt-row-sub', children: branch.hasLocal === true ? t('row.hasLocal') : t('status.upstream', { upstream: branch.name }) }),
-                    ],
-                  }),
-                ],
-              }, branch.name)),
-              branches.remotes.length === 0 && jsx('div', { className: 'dsh-wt-note', children: t('panel.noMatches') }),
             ],
           }),
         ],

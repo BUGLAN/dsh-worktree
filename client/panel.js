@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
-import { BranchIcon, CheckIcon, ChevronIcon, FolderIcon, PlusIcon, RemoteBranchIcon, SearchIcon, SpinnerIcon, TrashIcon, WarningIcon, WorktreeIcon } from './icons.js';
+import { BranchIcon, CheckIcon, ChevronIcon, FolderIcon, PlusIcon, SearchIcon, SpinnerIcon, TrashIcon, WarningIcon, WorktreeIcon } from './icons.js';
 
 /**
  * Place the panel against its anchor and keep it inside the viewport.
@@ -384,7 +384,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     setBusy({ kind: 'create', name });
     setError(null);
     try {
-      const value = await api.createWorktree({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }) });
+      const value = await api.createWorktreeSession({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }) });
       if (value.ok !== true) {
         fail(t('error.createFailed'), value);
         return false;
@@ -408,14 +408,11 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
     const locals = (status?.branches ?? []).filter((branch) => branch.kind === 'local');
-    const remotes = (status?.branches ?? []).filter((branch) => branch.kind === 'remote' && branch.hasLocal !== true);
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
       worktrees: (status?.worktrees ?? []).filter((entry) => normalized === '' || (entry.branch ?? entry.name).toLowerCase().includes(normalized)),
       locals: locals.filter(match),
-      remotes: remotes.filter(match),
       localsHidden: locals.length - locals.filter(match).length,
-      remotesHidden: remotes.length - remotes.filter(match).length,
     };
   }, [status, normalized]);
 
@@ -562,7 +559,10 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                         void openDirectory(entry.path);
                       },
                       children: [
-                        jsx('span', { className: 'dsh-wt-row-icon', children: entry.isMain === true ? jsx(BranchIcon, {}) : jsx(WorktreeIcon, {}) }),
+                        jsx('span', {
+                          className: 'dsh-wt-row-icon',
+                          children: entry.isMain === true || entry.inPool !== true ? jsx(BranchIcon, {}) : jsx(WorktreeIcon, {}),
+                        }),
                         jsxs('span', {
                           className: 'dsh-wt-row-main',
                           children: [
@@ -581,7 +581,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                             }),
                           ],
                         }),
-                        isCurrent === true && jsx('span', { className: 'dsh-wt-row-check', children: jsx(CheckIcon, { size: 14 }) }),
+                        isCurrent === true && jsx('span', { className: 'dsh-wt-row-here', children: t('row.here') }),
                         jsxs('span', {
                           className: 'dsh-wt-row-actions',
                           children: [
@@ -648,30 +648,6 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                 }, branch.name);
               }),
               branches.locals.length === 0 && jsx('div', { className: 'dsh-wt-note', children: t('panel.noMatches') }),
-            ],
-          }),
-          status?.isRepo === true && jsxs('div', {
-            className: 'dsh-wt-section',
-            children: [
-              jsx('div', { className: 'dsh-wt-section-title', children: t('panel.remoteSection') }),
-              branches.remotes.map((branch) => jsx('button', {
-                type: 'button',
-                className: 'dsh-wt-row',
-                onClick: () => {
-                  void switchTo(branch.name);
-                },
-                children: [
-                  jsx('span', { className: 'dsh-wt-row-icon', children: jsx(RemoteBranchIcon, {}) }),
-                  jsxs('span', {
-                    className: 'dsh-wt-row-main',
-                    children: [
-                      jsx('span', { className: 'dsh-wt-row-title', children: jsx('span', { className: 'dsh-wt-row-name', children: branch.name }) }),
-                      jsx('span', { className: 'dsh-wt-row-sub', children: branch.hasLocal === true ? t('row.hasLocal') : t('status.upstream', { upstream: branch.name }) }),
-                    ],
-                  }),
-                ],
-              }, branch.name)),
-              branches.remotes.length === 0 && jsx('div', { className: 'dsh-wt-note', children: t('panel.noMatches') }),
             ],
           }),
         ],

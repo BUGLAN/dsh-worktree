@@ -134,6 +134,19 @@ function parseEnterRequest(value) {
   };
 }
 
+/** `request: { sessionId, name, startPoint?, openInSession? }` — worktree for this workspace. */
+function parseCreateSessionRequest(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const startPoint = optionalString(value.startPoint, 'request.startPoint');
+  const openInSession = optionalBoolean(value.openInSession, 'request.openInSession');
+  return {
+    sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
+    name: nonEmptyString(value.name, 'request.name'),
+    ...(startPoint === undefined || startPoint === null ? {} : { startPoint }),
+    ...(openInSession === undefined ? {} : { openInSession }),
+  };
+}
+
 /** `request: { sessionId, path, force? }` — remove one pool worktree. */
 function parseRemoveRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
@@ -179,6 +192,8 @@ export const DESCRIPTORS = Object.freeze([
     resultCodec('SwitchBranchValue', 'switch outcome or a structured state that needs a user decision')),
   method('createWorktree', param('request', parseCreateRequest, 'session, new branch name, and optional start point'),
     resultCodec('CreateWorktreeValue', 'created worktree checkout under the pool, or a structured failure')),
+  method('createWorktreeSession', param('request', parseCreateSessionRequest, 'session, branch name, and optional start point'),
+    resultCodec('CreateWorktreeValue', 'a worktree joined to the current workspace, or a structured failure')),
   method('enterWorktree', param('request', parseEnterRequest, 'session that should move into an existing checkout'),
     resultCodec('EnterWorktreeValue', 'committed working directory after the move, or a structured failure')),
   method('removeWorktree', param('request', parseRemoveRequest, 'session, pool worktree path, and force consent'),
