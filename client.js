@@ -239,6 +239,9 @@ function endpointOf(name) {
  */
 
 const en = {
+  'create.branchPlaceholder': "New branch name, e.g. feature/login",
+  'create.worktreePlaceholder': "Worktree branch name",
+  'create.openSessionShort': "open",
   'create.branchAction': "Branch",
   'create.worktreeAction': "Permanent worktree",
   'create.branchTitle': "Create and check out a branch here",
@@ -328,6 +331,9 @@ const en = {
 };
 
 const zh = {
+  'create.branchPlaceholder': "新分支名，例如 feature/login",
+  'create.worktreePlaceholder': "工作树分支名",
+  'create.openSessionShort': "打开",
   'create.branchAction': "分支",
   'create.worktreeAction': "永久工作树",
   'create.branchTitle': "在当前检出创建并迁出分支",
@@ -507,16 +513,16 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-create-toggle:active:not(:disabled){transform:translateY(.5px)}
 .dsh-wt-panel .dsh-wt-create-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
 .dsh-wt-panel .dsh-wt-create-toggle:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:default}
-.dsh-wt-panel .dsh-wt-create-form{display:flex;flex-direction:column;gap:7px;padding:6px 6px 3px;animation:dsh-wt-enter .14s cubic-bezier(.22,1,.36,1)}
-.dsh-wt-panel .dsh-wt-create-form .dsh-wt-field{display:flex;flex-direction:column;gap:3px}
-.dsh-wt-panel .dsh-wt-create-form label{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10px;letter-spacing:.05em;text-transform:uppercase;line-height:14px}
-.dsh-wt-panel .dsh-wt-create-form input[type=text]{height:29px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:18px;outline:none;transition:border-color .12s ease,box-shadow .12s ease}
+/* create form: one compact row — name, start point, submit */
+.dsh-wt-panel .dsh-wt-create-form{display:flex;align-items:center;gap:5px;padding:5px 6px 4px;animation:dsh-wt-enter .14s cubic-bezier(.22,1,.36,1)}
+.dsh-wt-panel .dsh-wt-create-form input[type=text]{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:18px;outline:none;transition:border-color .12s ease,box-shadow .12s ease}
 .dsh-wt-panel .dsh-wt-create-form input[type=text]::placeholder{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:inherit}
 .dsh-wt-panel .dsh-wt-create-form input[type=text]:focus{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary,#4d8dff) 18%,transparent)}
-.dsh-wt-panel .dsh-wt-create-form select{height:29px;padding:0 6px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12px;line-height:18px;outline:none}
-.dsh-wt-panel .dsh-wt-checkbox{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:16px;cursor:pointer;user-select:none}
-.dsh-wt-panel .dsh-wt-checkbox input{margin:0;accent-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
-.dsh-wt-panel .dsh-wt-create-actions{display:flex;justify-content:flex-end;gap:6px}
+.dsh-wt-panel .dsh-wt-create-form select{flex:none;width:96px;height:28px;padding:0 4px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;line-height:18px;outline:none}
+.dsh-wt-panel .dsh-wt-create-form select:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+.dsh-wt-panel .dsh-wt-create-open{display:inline-flex;align-items:center;gap:4px;flex:none;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;cursor:pointer;user-select:none;white-space:nowrap}
+.dsh-wt-panel .dsh-wt-create-open input{margin:0;width:12px;height:12px;accent-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+.dsh-wt-panel .dsh-wt-create-form .dsh-wt-button{flex:none;height:28px;padding:0 10px}
 .dsh-wt-panel .dsh-wt-button{display:inline-flex;align-items:center;gap:5px;height:27px;padding:0 11px;border:none;border-radius:6px;font-size:12.5px;font-weight:500;line-height:18px;cursor:pointer;transition:background .12s ease,filter .12s ease,transform .08s ease}
 .dsh-wt-panel .dsh-wt-button:active:not(:disabled){transform:translateY(.5px)}
 .dsh-wt-panel .dsh-wt-button:disabled{cursor:default;opacity:.5}
@@ -1610,6 +1616,7 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
       }),
       expanded === true && jsxs('form', {
         className: 'dsh-wt-create-form',
+        'data-mode': mode,
         onSubmit: async (event) => {
           event.preventDefault();
           if (name.trim().length === 0 || submitting === true) return;
@@ -1624,44 +1631,47 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
             setSubmitting(false);
           }
         },
+        onKeyDown: (event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            setMode(null);
+          }
+        },
         children: [
-          jsxs('div', {
-            className: 'dsh-wt-field',
-            children: [
-              jsx('label', { htmlFor: 'dsh-wt-create-name', children: title }),
-              jsx('input', {
-                ref: nameRef,
-                id: 'dsh-wt-create-name',
-                type: 'text',
-                value: name,
-                placeholder: t('create.namePlaceholder'),
-                autoComplete: 'off',
-                spellCheck: false,
-                onChange: (event) => {
-                  setName(event.target.value);
-                },
-              }),
-            ],
+          // One row: the branch name, its start point, and the confirm action.
+          // The mode is carried by the placeholder and the submit label, so the
+          // form needs no heading of its own and the panel keeps its height.
+          jsx('input', {
+            ref: nameRef,
+            id: 'dsh-wt-create-name',
+            className: 'dsh-wt-create-name',
+            type: 'text',
+            value: name,
+            placeholder: mode === 'worktree' ? t('create.worktreePlaceholder') : t('create.branchPlaceholder'),
+            'aria-label': title,
+            autoComplete: 'off',
+            spellCheck: false,
+            onChange: (event) => {
+              setName(event.target.value);
+            },
           }),
-          jsxs('div', {
-            className: 'dsh-wt-field',
+          jsxs('select', {
+            id: 'dsh-wt-create-from',
+            className: 'dsh-wt-create-from',
+            value: startPoint,
+            'aria-label': t('create.from'),
+            title: t('create.from'),
+            onChange: (event) => {
+              setStartPoint(event.target.value);
+            },
             children: [
-              jsx('label', { htmlFor: 'dsh-wt-create-from', children: t('create.from') }),
-              jsxs('select', {
-                id: 'dsh-wt-create-from',
-                value: startPoint,
-                onChange: (event) => {
-                  setStartPoint(event.target.value);
-                },
-                children: [
-                  jsx('option', { value: '', children: t('create.fromHead') }),
-                  ...options.locals.map((value) => jsx('option', { value, children: value }, `local:${value}`)),
-                ],
-              }),
+              jsx('option', { value: '', children: t('create.fromHead') }),
+              ...options.locals.map((value) => jsx('option', { value, children: value }, `local:${value}`)),
             ],
           }),
           mode === 'worktree' && jsx('label', {
-            className: 'dsh-wt-checkbox',
+            className: 'dsh-wt-create-open',
+            title: t('create.openSession'),
             children: [
               jsx('input', {
                 type: 'checkbox',
@@ -1670,22 +1680,17 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
                   setOpenSession(event.target.checked);
                 },
               }),
-              t('create.openSession'),
+              jsx('span', { children: t('create.openSessionShort') }),
             ],
           }),
-          jsxs('div', {
-            className: 'dsh-wt-create-actions',
-            children: [
-              jsx('button', { type: 'button', className: 'dsh-wt-button', 'data-variant': 'plain', onClick: () => { setMode(null); }, children: t('error.cancel') }),
-              jsxs('button', {
-                type: 'submit',
-                className: 'dsh-wt-button',
-                'data-variant': 'primary',
-                disabled: name.trim().length === 0 || submitting === true,
-                'data-testid': 'dsh-worktree-create-submit',
-                children: submitting === true ? t('create.submitting') : submitLabel,
-              }),
-            ],
+          jsxs('button', {
+            type: 'submit',
+            className: 'dsh-wt-button',
+            'data-variant': 'primary',
+            disabled: name.trim().length === 0 || submitting === true,
+            'data-testid': 'dsh-worktree-create-submit',
+            title: `${submitLabel}  ·  Esc ${t('error.cancel')}`,
+            children: submitting === true ? t('create.submitting') : submitLabel,
           }),
         ],
       }),

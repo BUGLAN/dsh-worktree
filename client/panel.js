@@ -687,6 +687,7 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
       }),
       expanded === true && jsxs('form', {
         className: 'dsh-wt-create-form',
+        'data-mode': mode,
         onSubmit: async (event) => {
           event.preventDefault();
           if (name.trim().length === 0 || submitting === true) return;
@@ -701,44 +702,47 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
             setSubmitting(false);
           }
         },
+        onKeyDown: (event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            setMode(null);
+          }
+        },
         children: [
-          jsxs('div', {
-            className: 'dsh-wt-field',
-            children: [
-              jsx('label', { htmlFor: 'dsh-wt-create-name', children: title }),
-              jsx('input', {
-                ref: nameRef,
-                id: 'dsh-wt-create-name',
-                type: 'text',
-                value: name,
-                placeholder: t('create.namePlaceholder'),
-                autoComplete: 'off',
-                spellCheck: false,
-                onChange: (event) => {
-                  setName(event.target.value);
-                },
-              }),
-            ],
+          // One row: the branch name, its start point, and the confirm action.
+          // The mode is carried by the placeholder and the submit label, so the
+          // form needs no heading of its own and the panel keeps its height.
+          jsx('input', {
+            ref: nameRef,
+            id: 'dsh-wt-create-name',
+            className: 'dsh-wt-create-name',
+            type: 'text',
+            value: name,
+            placeholder: mode === 'worktree' ? t('create.worktreePlaceholder') : t('create.branchPlaceholder'),
+            'aria-label': title,
+            autoComplete: 'off',
+            spellCheck: false,
+            onChange: (event) => {
+              setName(event.target.value);
+            },
           }),
-          jsxs('div', {
-            className: 'dsh-wt-field',
+          jsxs('select', {
+            id: 'dsh-wt-create-from',
+            className: 'dsh-wt-create-from',
+            value: startPoint,
+            'aria-label': t('create.from'),
+            title: t('create.from'),
+            onChange: (event) => {
+              setStartPoint(event.target.value);
+            },
             children: [
-              jsx('label', { htmlFor: 'dsh-wt-create-from', children: t('create.from') }),
-              jsxs('select', {
-                id: 'dsh-wt-create-from',
-                value: startPoint,
-                onChange: (event) => {
-                  setStartPoint(event.target.value);
-                },
-                children: [
-                  jsx('option', { value: '', children: t('create.fromHead') }),
-                  ...options.locals.map((value) => jsx('option', { value, children: value }, `local:${value}`)),
-                ],
-              }),
+              jsx('option', { value: '', children: t('create.fromHead') }),
+              ...options.locals.map((value) => jsx('option', { value, children: value }, `local:${value}`)),
             ],
           }),
           mode === 'worktree' && jsx('label', {
-            className: 'dsh-wt-checkbox',
+            className: 'dsh-wt-create-open',
+            title: t('create.openSession'),
             children: [
               jsx('input', {
                 type: 'checkbox',
@@ -747,22 +751,17 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
                   setOpenSession(event.target.checked);
                 },
               }),
-              t('create.openSession'),
+              jsx('span', { children: t('create.openSessionShort') }),
             ],
           }),
-          jsxs('div', {
-            className: 'dsh-wt-create-actions',
-            children: [
-              jsx('button', { type: 'button', className: 'dsh-wt-button', 'data-variant': 'plain', onClick: () => { setMode(null); }, children: t('error.cancel') }),
-              jsxs('button', {
-                type: 'submit',
-                className: 'dsh-wt-button',
-                'data-variant': 'primary',
-                disabled: name.trim().length === 0 || submitting === true,
-                'data-testid': 'dsh-worktree-create-submit',
-                children: submitting === true ? t('create.submitting') : submitLabel,
-              }),
-            ],
+          jsxs('button', {
+            type: 'submit',
+            className: 'dsh-wt-button',
+            'data-variant': 'primary',
+            disabled: name.trim().length === 0 || submitting === true,
+            'data-testid': 'dsh-worktree-create-submit',
+            title: `${submitLabel}  ·  Esc ${t('error.cancel')}`,
+            children: submitting === true ? t('create.submitting') : submitLabel,
           }),
         ],
       }),

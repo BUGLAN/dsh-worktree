@@ -5,6 +5,9 @@
  */
 
 export const en = {
+  'create.branchPlaceholder': "New branch name, e.g. feature/login",
+  'create.worktreePlaceholder': "Worktree branch name",
+  'create.openSessionShort': "open",
   'create.branchAction': "Branch",
   'create.worktreeAction': "Permanent worktree",
   'create.branchTitle': "Create and check out a branch here",
@@ -94,6 +97,9 @@ export const en = {
 };
 
 export const zh = {
+  'create.branchPlaceholder': "新分支名，例如 feature/login",
+  'create.worktreePlaceholder': "工作树分支名",
+  'create.openSessionShort': "打开",
   'create.branchAction': "分支",
   'create.worktreeAction': "永久工作树",
   'create.branchTitle': "在当前检出创建并迁出分支",
