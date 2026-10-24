@@ -12,7 +12,7 @@
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 import { WorktreeService, resolveOptions } from '../index.js';
 
@@ -160,7 +160,11 @@ try {
   // --- createWorktree -----------------------------------------------------
   value = await service.createWorktree({ sessionId: 's1', name: 'task-1' });
   check('createWorktree: ok', value.ok === true, JSON.stringify(value));
-  check('createWorktree: pool path', value.ok === true && value.path === join(pool, 'task-1'));
+  // The directory is a generated id, not the branch name, so two repositories
+  // can both hold a branch called task-1 without colliding in the pool.
+  check('createWorktree: pool path uses wt-id', value.ok === true && basename(value.path).startsWith('wt-') && basename(value.path).length === 7, value.ok === true ? value.path : '');
+  check('createWorktree: branch keeps the requested name', value.ok === true && value.branch === 'task-1');
+  check('createWorktree: worktreeId returned', value.ok === true && /^wt-[0-9a-f]{4}$/.test(value.worktreeId ?? ''), value.ok === true ? String(value.worktreeId) : '');
   const worktreePath = value.path;
   value = await service.createWorktree({ sessionId: 's1', name: 'task-1' });
   check('createWorktree: duplicate branch fails', value.ok === false && value.code === 'branch-exists');
@@ -173,7 +177,7 @@ try {
 
   // --- gitInfo after creation ---------------------------------------------
   value = await service.gitInfo([repo, worktreePath]);
-  check('gitInfo: worktree recognized', value.items[1].isRepo === true && value.items[1].isWorktree === true && value.items[1].worktreeName === 'task-1', JSON.stringify(value.items[1]));
+  check('gitInfo: worktree recognized', value.items[1].isRepo === true && value.items[1].isWorktree === true && value.items[1].worktreeName === basename(worktreePath), JSON.stringify(value.items[1]));
   check('gitInfo: worktree branch', value.items[1].branch === 'task-1');
 
   // --- enterWorktree ------------------------------------------------------
@@ -228,7 +232,7 @@ try {
 
   // --- status shows worktrees + occupancy ----------------------------------
   value = await service.status('s1');
-  const listedTask = value.worktrees.find((entry) => entry.name === 'task-1');
+  const listedTask = value.worktrees.find((entry) => entry.branch === 'task-1');
   check('status: pool worktree listed', listedTask !== undefined && listedTask.inPool === true && listedTask.branch === 'task-1');
   const occupiedMain = value.branches.find((entry) => entry.name === 'main');
   check('status: main not occupied for own checkout', occupiedMain?.occupiedPath == null);

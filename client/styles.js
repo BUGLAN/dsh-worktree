@@ -55,6 +55,16 @@ export const CSS = `
 .dsh-wt-panel .dsh-wt-section-title::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--dsw-alias-border-l1),transparent)}
 .dsh-wt-panel .dsh-wt-section-title .dsh-wt-section-extra{margin-left:0;font-family:inherit;font-weight:400;text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;font-size:10px;opacity:.75}
 
+/* worktree form: fixed directory prefix + branch name + slug preview */
+.dsh-wt-panel .dsh-wt-create-prefix{display:inline-flex;align-items:center;flex:none;height:28px;padding:0 0 0 7px;border:1px solid var(--dsw-alias-border-l2);border-right:none;border-radius:6px 0 0 6px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#fff) 5%,transparent);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.dsh-wt-panel .dsh-wt-create-prefix-dir{letter-spacing:-.01em}
+.dsh-wt-panel .dsh-wt-create-prefix-sep{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));padding:0 1px}
+.dsh-wt-panel .dsh-wt-create-form .dsh-wt-create-name[value]{border-radius:0 6px 6px 0}
+.dsh-wt-panel .dsh-wt-create-form.has-prefix .dsh-wt-create-name{border-radius:0 6px 6px 0}
+/* branch rows: the pool directory id leads the branch name */
+.dsh-wt-panel .dsh-wt-row[data-kind="worktree"] .dsh-wt-row-icon,.dsh-wt-panel .dsh-wt-row-icon[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
+.dsh-wt-panel .dsh-wt-row-dir{flex:none;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11px;letter-spacing:-.01em}
+
 /* rows */
 .dsh-wt-panel .dsh-wt-row{display:flex;align-items:center;gap:8px;width:100%;padding:5px 11px;margin:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;text-align:left;cursor:pointer;border-radius:0;animation:dsh-wt-row-in .16s ease both}
 .dsh-wt-panel .dsh-wt-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07))}

@@ -589,6 +589,29 @@ export class WorktreeService {
   }
 
   /**
+   * Allocate the next pool directory name: `wt-` plus four hex digits.
+   *
+   * The suffix is random rather than a counter so two repositories never race
+   * for the same directory, and an id is never reused after a removal. Existing
+   * names are probed instead of tracked, so the pool stays the source of truth.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns a directory name that does not exist in the pool yet.
+   */
+  async nextWorktreeId(signal) {
+    const { randomBytes } = await import('node:crypto');
+    for (let attempt = 0; attempt < 64; attempt += 1) {
+      const id = `wt-${randomBytes(2).toString('hex')}`;
+      try {
+        await stat(join(this.options.poolDirectory, id));
+      } catch {
+        return id;
+      }
+      if (signal?.aborted === true) throw new Error('aborted');
+    }
+    throw new Error(`cannot allocate a unique worktree id under ${this.options.poolDirectory}`);
+  }
+
+  /**
    * Create one branch and check it out **in this checkout** — no worktree.
    *
    * The atomic sibling of {@link createWorktree}: this is the "just a branch"
@@ -783,7 +806,29 @@ export class WorktreeService {
       if (error instanceof GitCommandError) return failure('start-point-invalid', `Cannot start from ${startPoint}.`, { detail: excerpt(error.stderr), startPoint });
       throw error;
     }
-    const destination = await this.canonical(join(this.options.poolDirectory, name), undefined, bound);
+    // The checkout directory is a short generated id, not the branch name.
+    // Branch names collide across projects (`main`, `feat/abc`), so keying the
+    // pool directory by branch would make two repositories fight over one path;
+    // `wt-<4 hex>` is unique, short, and cheap to display next to the branch.
+    // The Client proposes the id so the form can show the real directory while
+    // the user types; the Host still owns uniqueness and syntax.
+    const proposed = typeof request.worktreeId === 'string' ? request.worktreeId.trim() : '';
+    let worktreeId;
+    if (proposed.length > 0) {
+      if (!/^wt-[0-9a-f]{4}$/.test(proposed)) {
+        return failure('invalid-worktree-id', `"${proposed}" is not a valid worktree id.`, { worktreeId: proposed, hint: 'An id looks like wt-1a2b.' });
+      }
+      try {
+        await stat(join(this.options.poolDirectory, proposed));
+        return failure('worktree-id-taken', `Worktree ${proposed} already exists.`, { worktreeId: proposed });
+      } catch {
+        /* Absent directory: the proposed id is free. */
+      }
+      worktreeId = proposed;
+    } else {
+      worktreeId = await this.nextWorktreeId(bound);
+    }
+    const destination = await this.canonical(join(this.options.poolDirectory, worktreeId), undefined, bound);
     try {
       await stat(destination);
       return failure('path-exists', `The checkout directory ${destination} already exists.`, { path: destination });
@@ -824,6 +869,7 @@ export class WorktreeService {
       return {
         ok: true,
         path: destination,
+        worktreeId,
         branch: name,
         baseCommit,
         repositoryRoot: state.repositoryRoot,

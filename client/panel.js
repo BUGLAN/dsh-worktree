@@ -96,6 +96,13 @@ const baseName = (path) => {
 
 const dirtyLabel = (t, count) => (count === null || count === undefined ? null : t('status.dirty', { n: String(count) }));
 
+/** A fresh checkout directory name: `wt-` plus four lowercase hex digits. */
+const makeWorktreeId = () => {
+  const bytes = new Uint8Array(2);
+  crypto.getRandomValues(bytes);
+  return `wt-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+};
+
 /**
  * The toolbar trigger plus its anchored panel.
  * @param props.sessionId - current session identity.
@@ -396,11 +403,11 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
    * moving the *current* session into the checkout would take the working
    * context away from under the user.
    */
-  const createWorktreeBranch = useCallback(async ({ name, startPoint }) => {
+  const createWorktreeBranch = useCallback(async ({ name, startPoint, worktreeId }) => {
     setBusy({ kind: 'worktree', name });
     setError(null);
     try {
-      const value = await api.createWorktree({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }) });
+      const value = await api.createWorktree({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }), ...(worktreeId === undefined ? {} : { worktreeId }) });
       if (value.ok !== true) {
         fail(t('error.createFailed'), value);
         return false;
@@ -419,12 +426,20 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
 
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
+    // Which branches are checked out in a pool worktree, keyed by branch name.
+    // A worktree row and a plain branch row share the same list, so the icon and
+    // the id badge come from this map rather than from the row itself.
+    const byWorktree = new Map();
+    for (const entry of status?.worktrees ?? []) {
+      if (typeof entry.branch === 'string' && entry.inPool === true) byWorktree.set(entry.branch, entry);
+    }
     // The picker lists the branches this checkout can switch to. A branch that
     // another worktree already holds carries an `occupiedPath` from the Host and
     // is not switchable here, so it is left out — showing it would only offer an
     // action that gets refused. This is presentation logic and lives here alone.
     const locals = (status?.branches ?? [])
-      .filter((branch) => branch.kind === 'local' && branch.occupiedPath == null);
+      .filter((branch) => branch.kind === 'local' && branch.occupiedPath == null)
+      .map((branch) => ({ ...branch, worktree: byWorktree.get(branch.name) ?? null }));
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
       locals: locals.filter(match),
@@ -578,11 +593,27 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                     void switchTo(branch.name);
                   },
                   children: [
-                    jsx('span', { className: 'dsh-wt-row-icon', children: busyRow === true ? jsx(SpinnerIcon, {}) : jsx(BranchIcon, {}) }),
+                    jsx('span', {
+                      className: 'dsh-wt-row-icon',
+                      'data-variant': branch.worktree === null ? 'branch' : 'worktree',
+                      children: busyRow === true
+                        ? jsx(SpinnerIcon, {})
+                        : (branch.worktree === null ? jsx(BranchIcon, {}) : jsx(WorktreeIcon, {})),
+                    }),
                     jsxs('span', {
                       className: 'dsh-wt-row-main',
                       children: [
-                        jsx('span', { className: 'dsh-wt-row-title', children: jsx('span', { className: 'dsh-wt-row-name', children: branch.name }) }),
+                        jsx('span', {
+                          className: 'dsh-wt-row-title',
+                          children: jsxs(Fragment, {
+                            children: [
+                              // A pool branch reads as `wt-1a2b/feat-abc`: the id is
+                              // the directory the checkout lives in, so it leads.
+                              branch.worktree !== null && jsx('span', { className: 'dsh-wt-row-dir', children: `${baseName(branch.worktree.path)}/` }),
+                              jsx('span', { className: 'dsh-wt-row-name', children: branch.name }),
+                            ],
+                          }),
+                        }),
                         isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
                           ? jsx('span', { className: 'dsh-wt-row-sub', 'data-tone': 'warn', children: dirtyLabel(t, currentDirty) })
                           : null,
@@ -622,11 +653,16 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
   const [name, setName] = useState('');
   const [startPoint, setStartPoint] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // A worktree checkout directory is `wt-<4 hex>`. The id is drawn when the form
+  // opens so the prefix the user reads is the directory that will really be
+  // created; the Host still validates it and re-draws when it is taken.
+  const [worktreeId, setWorktreeId] = useState(() => makeWorktreeId());
   const nameRef = useRef(null);
   useEffect(() => {
     if (mode === null) return;
     setName('');
     setStartPoint('');
+    setWorktreeId(makeWorktreeId());
     const frame = requestAnimationFrame(() => {
       nameRef.current?.focus({ preventScroll: true });
     });
@@ -679,7 +715,7 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           if (name.trim().length === 0 || submitting === true) return;
           setSubmitting(true);
           try {
-            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint });
+            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint, worktreeId });
             if (done === true) {
               setName('');
               setStartPoint('');
@@ -695,9 +731,18 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           }
         },
         children: [
-          // One row: the branch name, its start point, and the confirm action.
-          // The mode is carried by the placeholder and the submit label, so the
-          // form needs no heading of its own and the panel keeps its height.
+          // One row: the checkout directory, the branch name, its start point,
+          // and the confirm action. In worktree mode the fixed `wt-xxxx/` prefix
+          // is rendered as a non-editable label so the user sees the directory
+          // the checkout will get, while only the branch name is typed and sent.
+          mode === 'worktree' && jsxs('span', {
+            className: 'dsh-wt-create-prefix',
+            title: t('create.prefixHint'),
+            children: [
+              jsx('span', { className: 'dsh-wt-create-prefix-dir', children: worktreeId }),
+              jsx('span', { className: 'dsh-wt-create-prefix-sep', children: '/' }),
+            ],
+          }),
           jsx('input', {
             ref: nameRef,
             id: 'dsh-wt-create-name',

@@ -5,6 +5,8 @@
  */
 
 export const en = {
+  'create.prefixHint': "Checkout directory created for this worktree",
+  'create.previewHint': "Branch name as stored: slashes become dashes in the label",
   'create.branchPlaceholder': "New branch name, e.g. feature/login",
   'create.worktreePlaceholder': "Worktree branch name",
   'create.branchAction': "Branch",
@@ -95,6 +97,8 @@ export const en = {
 };
 
 export const zh = {
+  'create.prefixHint': "此工作树的检出目录",
+  'create.previewHint': "分支名中的斜杠在显示时转为短横线",
   'create.branchPlaceholder': "新分支名，例如 feature/login",
   'create.worktreePlaceholder': "工作树分支名",
   'create.branchAction': "分支",

@@ -114,14 +114,16 @@ function parseSwitchRequest(value) {
   };
 }
 
-/** `request: { sessionId, name, startPoint? }` — create a branch and its worktree. */
+/** `request: { sessionId, name, startPoint?, worktreeId? }` — branch + worktree. */
 function parseCreateRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
   const startPoint = optionalString(value.startPoint, 'request.startPoint');
+  const worktreeId = optionalString(value.worktreeId, 'request.worktreeId');
   return {
     sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
     name: nonEmptyString(value.name, 'request.name'),
     ...(startPoint === undefined || startPoint === null ? {} : { startPoint }),
+    ...(worktreeId === undefined || worktreeId === null ? {} : { worktreeId }),
   };
 }
 

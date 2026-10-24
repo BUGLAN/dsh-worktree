@@ -133,14 +133,16 @@ function parseSwitchRequest(value) {
   };
 }
 
-/** `request: { sessionId, name, startPoint? }` — create a branch and its worktree. */
+/** `request: { sessionId, name, startPoint?, worktreeId? }` — branch + worktree. */
 function parseCreateRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
   const startPoint = optionalString(value.startPoint, 'request.startPoint');
+  const worktreeId = optionalString(value.worktreeId, 'request.worktreeId');
   return {
     sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
     name: nonEmptyString(value.name, 'request.name'),
     ...(startPoint === undefined || startPoint === null ? {} : { startPoint }),
+    ...(worktreeId === undefined || worktreeId === null ? {} : { worktreeId }),
   };
 }
 
@@ -239,6 +241,8 @@ function endpointOf(name) {
  */
 
 const en = {
+  'create.prefixHint': "Checkout directory created for this worktree",
+  'create.previewHint': "Branch name as stored: slashes become dashes in the label",
   'create.branchPlaceholder': "New branch name, e.g. feature/login",
   'create.worktreePlaceholder': "Worktree branch name",
   'create.branchAction': "Branch",
@@ -329,6 +333,8 @@ const en = {
 };
 
 const zh = {
+  'create.prefixHint': "此工作树的检出目录",
+  'create.previewHint': "分支名中的斜杠在显示时转为短横线",
   'create.branchPlaceholder': "新分支名，例如 feature/login",
   'create.worktreePlaceholder': "工作树分支名",
   'create.branchAction': "分支",
@@ -476,6 +482,16 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-section-title{display:flex;align-items:center;gap:6px;padding:7px 11px 4px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;user-select:none;line-height:14px}
 .dsh-wt-panel .dsh-wt-section-title::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--dsw-alias-border-l1),transparent)}
 .dsh-wt-panel .dsh-wt-section-title .dsh-wt-section-extra{margin-left:0;font-family:inherit;font-weight:400;text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;font-size:10px;opacity:.75}
+
+/* worktree form: fixed directory prefix + branch name + slug preview */
+.dsh-wt-panel .dsh-wt-create-prefix{display:inline-flex;align-items:center;flex:none;height:28px;padding:0 0 0 7px;border:1px solid var(--dsw-alias-border-l2);border-right:none;border-radius:6px 0 0 6px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#fff) 5%,transparent);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.dsh-wt-panel .dsh-wt-create-prefix-dir{letter-spacing:-.01em}
+.dsh-wt-panel .dsh-wt-create-prefix-sep{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));padding:0 1px}
+.dsh-wt-panel .dsh-wt-create-form .dsh-wt-create-name[value]{border-radius:0 6px 6px 0}
+.dsh-wt-panel .dsh-wt-create-form.has-prefix .dsh-wt-create-name{border-radius:0 6px 6px 0}
+/* branch rows: the pool directory id leads the branch name */
+.dsh-wt-panel .dsh-wt-row[data-kind="worktree"] .dsh-wt-row-icon,.dsh-wt-panel .dsh-wt-row-icon[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
+.dsh-wt-panel .dsh-wt-row-dir{flex:none;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11px;letter-spacing:-.01em}
 
 /* rows */
 .dsh-wt-panel .dsh-wt-row{display:flex;align-items:center;gap:8px;width:100%;padding:5px 11px;margin:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;text-align:left;cursor:pointer;border-radius:0;animation:dsh-wt-row-in .16s ease both}
@@ -1019,6 +1035,13 @@ const baseName = (path) => {
 
 const dirtyLabel = (t, count) => (count === null || count === undefined ? null : t('status.dirty', { n: String(count) }));
 
+/** A fresh checkout directory name: `wt-` plus four lowercase hex digits. */
+const makeWorktreeId = () => {
+  const bytes = new Uint8Array(2);
+  crypto.getRandomValues(bytes);
+  return `wt-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+};
+
 /**
  * The toolbar trigger plus its anchored panel.
  * @param props.sessionId - current session identity.
@@ -1319,11 +1342,11 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
    * moving the *current* session into the checkout would take the working
    * context away from under the user.
    */
-  const createWorktreeBranch = useCallback(async ({ name, startPoint }) => {
+  const createWorktreeBranch = useCallback(async ({ name, startPoint, worktreeId }) => {
     setBusy({ kind: 'worktree', name });
     setError(null);
     try {
-      const value = await api.createWorktree({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }) });
+      const value = await api.createWorktree({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }), ...(worktreeId === undefined ? {} : { worktreeId }) });
       if (value.ok !== true) {
         fail(t('error.createFailed'), value);
         return false;
@@ -1342,12 +1365,20 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
 
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
+    // Which branches are checked out in a pool worktree, keyed by branch name.
+    // A worktree row and a plain branch row share the same list, so the icon and
+    // the id badge come from this map rather than from the row itself.
+    const byWorktree = new Map();
+    for (const entry of status?.worktrees ?? []) {
+      if (typeof entry.branch === 'string' && entry.inPool === true) byWorktree.set(entry.branch, entry);
+    }
     // The picker lists the branches this checkout can switch to. A branch that
     // another worktree already holds carries an `occupiedPath` from the Host and
     // is not switchable here, so it is left out — showing it would only offer an
     // action that gets refused. This is presentation logic and lives here alone.
     const locals = (status?.branches ?? [])
-      .filter((branch) => branch.kind === 'local' && branch.occupiedPath == null);
+      .filter((branch) => branch.kind === 'local' && branch.occupiedPath == null)
+      .map((branch) => ({ ...branch, worktree: byWorktree.get(branch.name) ?? null }));
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
       locals: locals.filter(match),
@@ -1501,11 +1532,27 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                     void switchTo(branch.name);
                   },
                   children: [
-                    jsx('span', { className: 'dsh-wt-row-icon', children: busyRow === true ? jsx(SpinnerIcon, {}) : jsx(BranchIcon, {}) }),
+                    jsx('span', {
+                      className: 'dsh-wt-row-icon',
+                      'data-variant': branch.worktree === null ? 'branch' : 'worktree',
+                      children: busyRow === true
+                        ? jsx(SpinnerIcon, {})
+                        : (branch.worktree === null ? jsx(BranchIcon, {}) : jsx(WorktreeIcon, {})),
+                    }),
                     jsxs('span', {
                       className: 'dsh-wt-row-main',
                       children: [
-                        jsx('span', { className: 'dsh-wt-row-title', children: jsx('span', { className: 'dsh-wt-row-name', children: branch.name }) }),
+                        jsx('span', {
+                          className: 'dsh-wt-row-title',
+                          children: jsxs(Fragment, {
+                            children: [
+                              // A pool branch reads as `wt-1a2b/feat-abc`: the id is
+                              // the directory the checkout lives in, so it leads.
+                              branch.worktree !== null && jsx('span', { className: 'dsh-wt-row-dir', children: `${baseName(branch.worktree.path)}/` }),
+                              jsx('span', { className: 'dsh-wt-row-name', children: branch.name }),
+                            ],
+                          }),
+                        }),
                         isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
                           ? jsx('span', { className: 'dsh-wt-row-sub', 'data-tone': 'warn', children: dirtyLabel(t, currentDirty) })
                           : null,
@@ -1545,11 +1592,16 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
   const [name, setName] = useState('');
   const [startPoint, setStartPoint] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // A worktree checkout directory is `wt-<4 hex>`. The id is drawn when the form
+  // opens so the prefix the user reads is the directory that will really be
+  // created; the Host still validates it and re-draws when it is taken.
+  const [worktreeId, setWorktreeId] = useState(() => makeWorktreeId());
   const nameRef = useRef(null);
   useEffect(() => {
     if (mode === null) return;
     setName('');
     setStartPoint('');
+    setWorktreeId(makeWorktreeId());
     const frame = requestAnimationFrame(() => {
       nameRef.current?.focus({ preventScroll: true });
     });
@@ -1602,7 +1654,7 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           if (name.trim().length === 0 || submitting === true) return;
           setSubmitting(true);
           try {
-            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint });
+            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint, worktreeId });
             if (done === true) {
               setName('');
               setStartPoint('');
@@ -1618,9 +1670,18 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           }
         },
         children: [
-          // One row: the branch name, its start point, and the confirm action.
-          // The mode is carried by the placeholder and the submit label, so the
-          // form needs no heading of its own and the panel keeps its height.
+          // One row: the checkout directory, the branch name, its start point,
+          // and the confirm action. In worktree mode the fixed `wt-xxxx/` prefix
+          // is rendered as a non-editable label so the user sees the directory
+          // the checkout will get, while only the branch name is typed and sent.
+          mode === 'worktree' && jsxs('span', {
+            className: 'dsh-wt-create-prefix',
+            title: t('create.prefixHint'),
+            children: [
+              jsx('span', { className: 'dsh-wt-create-prefix-dir', children: worktreeId }),
+              jsx('span', { className: 'dsh-wt-create-prefix-sep', children: '/' }),
+            ],
+          }),
           jsx('input', {
             ref: nameRef,
             id: 'dsh-wt-create-name',
