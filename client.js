@@ -258,7 +258,6 @@ const en = {
   'panel.searchPlaceholder': 'Search branches…',
   'panel.currentSection': 'Working tree',
   'panel.worktreesSection': 'Worktrees',
-  'panel.localSection': 'Local branches',
   'panel.remoteSection': 'Remote branches',
   'panel.noMatches': 'No matching branch',
   'panel.poolHint': 'Pool: {path}',
@@ -348,7 +347,6 @@ const zh = {
   'panel.searchPlaceholder': '搜索分支…',
   'panel.currentSection': '本地文件状态',
   'panel.worktreesSection': 'Worktree',
-  'panel.localSection': '本地分支',
   'panel.remoteSection': '远程分支',
   'panel.noMatches': '没有匹配的分支',
   'panel.poolHint': '统一目录：{path}',
@@ -460,11 +458,15 @@ const CSS = `
 @container (width<=460px){.dsh-wt-trigger .dsh-wt-trigger-label{display:none}}
 
 /* ---- anchored panel ---- */
-.dsh-wt-panel{position:fixed;z-index:1100;width:352px;max-width:calc(100vw - 16px);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-overlay,Canvas));border:1px solid var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.28),0 14px 34px -8px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.045);display:flex;flex-direction:column;max-height:min(440px,calc(100vh - 96px));overflow:hidden;color:var(--dsw-alias-label-primary,CanvasText);font-size:13px;animation:dsh-wt-enter .14s cubic-bezier(.22,1,.36,1)}
+.dsh-wt-panel{position:fixed;z-index:1100;width:352px;max-width:calc(100vw - 16px);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-overlay,Canvas));border:1px solid var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.28),0 14px 34px -8px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.045);display:flex;flex-direction:column;height:min(520px,calc(100vh - 88px));overflow:hidden;color:var(--dsw-alias-label-primary,CanvasText);font-size:13px;animation:dsh-wt-enter .14s cubic-bezier(.22,1,.36,1)}
 .dsh-wt-panel-search{display:flex;align-items:center;gap:7px;padding:8px 11px;border-bottom:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));flex:none}
 .dsh-wt-panel-search input{flex:1;min-width:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:18px;letter-spacing:-.01em;outline:none}
 .dsh-wt-panel-search input::placeholder{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:inherit}
-.dsh-wt-panel-body{overflow-y:auto;overscroll-behavior:contain;padding:2px 0 4px;min-height:0;scrollbar-width:thin}
+.dsh-wt-panel-body{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:4px 0;min-height:0;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2,color-mix(in srgb,CanvasText 22%,Canvas)) transparent}
+.dsh-wt-panel-body::-webkit-scrollbar{width:9px}
+.dsh-wt-panel-body::-webkit-scrollbar-track{background:transparent}
+.dsh-wt-panel-body::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l2,color-mix(in srgb,CanvasText 22%,Canvas));border-radius:5px;border:2px solid transparent;background-clip:padding-box}
+.dsh-wt-panel-body::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-label-dimmed,color-mix(in srgb,CanvasText 34%,Canvas));background-clip:padding-box}
 
 /* section label: instrument-panel caption */
 .dsh-wt-panel .dsh-wt-section{margin:2px 0 0}
@@ -498,9 +500,9 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-note{padding:9px 11px;margin:4px 8px;border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#fff) 4%,transparent);color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px;border:1px solid var(--dsw-alias-border-l1)}
 
 /* footer: two atomic actions */
-.dsh-wt-footer{border-top:1px solid var(--dsw-alias-border-l1);padding:5px;flex:none;background:color-mix(in srgb,var(--dsw-alias-label-primary,#fff) 2.5%,transparent)}
-.dsh-wt-panel .dsh-wt-create-rows{display:flex;gap:5px}
-.dsh-wt-panel .dsh-wt-create-toggle{display:flex;align-items:center;justify-content:center;gap:6px;flex:1;min-width:0;padding:7px 8px;border:1px solid transparent;background:transparent;border-radius:7px;color:var(--dsw-alias-label-secondary);font-size:12.5px;font-weight:500;line-height:17px;cursor:pointer;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.dsh-wt-footer{border-top:1px solid var(--dsw-alias-border-l1);padding:3px;flex:none;background:color-mix(in srgb,var(--dsw-alias-label-primary,#fff) 2.5%,transparent)}
+.dsh-wt-panel .dsh-wt-create-rows{display:flex;gap:4px}
+.dsh-wt-panel .dsh-wt-create-toggle{display:flex;align-items:center;justify-content:center;gap:5px;flex:1;min-width:0;padding:5px 8px;border:1px solid transparent;background:transparent;border-radius:7px;color:var(--dsw-alias-label-secondary);font-size:12.5px;font-weight:500;line-height:17px;cursor:pointer;transition:background .12s ease,color .12s ease,border-color .12s ease}
 .dsh-wt-panel .dsh-wt-create-toggle:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07));color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l1)}
 .dsh-wt-panel .dsh-wt-create-toggle:active:not(:disabled){transform:translateY(.5px)}
 .dsh-wt-panel .dsh-wt-create-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
@@ -1488,11 +1490,12 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
             role: 'status',
             children: jsxs(Fragment, { children: [jsx(CheckIcon, { size: 14 }), jsx('span', { children: toast })] }),
           }),
-          status?.isRepo === true && jsxs('div', {
-            className: 'dsh-wt-section',
+          status?.isRepo === true && jsxs(Fragment, {
             children: [
-              jsx('div', { className: 'dsh-wt-section-title', children: t('panel.localSection') }),
-              branches.locals.map((branch, index) => {
+              branches.locals.length === 0 && jsx('div', { className: 'dsh-wt-note', children: t('panel.noMatches') }),
+              jsx('div', {
+                className: 'dsh-wt-section',
+                children: branches.locals.map((branch, index) => {
                 const isCurrent = branch.current === true;
                 const busyRow = busy !== null && busy.kind === 'switch' && busy.branch === branch.name;
                 return jsxs('button', {
@@ -1524,8 +1527,8 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                     isCurrent === true && jsx('span', { className: 'dsh-wt-row-check', children: jsx(CheckIcon, { size: 14 }) }),
                   ],
                 }, branch.name);
+                }),
               }),
-              branches.locals.length === 0 && jsx('div', { className: 'dsh-wt-note', children: t('panel.noMatches') }),
             ],
           }),
         ],

@@ -567,11 +567,12 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
             role: 'status',
             children: jsxs(Fragment, { children: [jsx(CheckIcon, { size: 14 }), jsx('span', { children: toast })] }),
           }),
-          status?.isRepo === true && jsxs('div', {
-            className: 'dsh-wt-section',
+          status?.isRepo === true && jsxs(Fragment, {
             children: [
-              jsx('div', { className: 'dsh-wt-section-title', children: t('panel.localSection') }),
-              branches.locals.map((branch, index) => {
+              branches.locals.length === 0 && jsx('div', { className: 'dsh-wt-note', children: t('panel.noMatches') }),
+              jsx('div', {
+                className: 'dsh-wt-section',
+                children: branches.locals.map((branch, index) => {
                 const isCurrent = branch.current === true;
                 const busyRow = busy !== null && busy.kind === 'switch' && busy.branch === branch.name;
                 return jsxs('button', {
@@ -603,8 +604,8 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                     isCurrent === true && jsx('span', { className: 'dsh-wt-row-check', children: jsx(CheckIcon, { size: 14 }) }),
                   ],
                 }, branch.name);
+                }),
               }),
-              branches.locals.length === 0 && jsx('div', { className: 'dsh-wt-note', children: t('panel.noMatches') }),
             ],
           }),
         ],
