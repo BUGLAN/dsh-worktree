@@ -106,7 +106,16 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
     setLoading(true);
     try {
       const value = await worktree.api.status(sessionId);
-      setStatus(value);
+      if (value.ok === false && value.code === 'session-unavailable') {
+        // The session's agent is still starting; retry once shortly.
+        await new Promise((resolve) => {
+          setTimeout(resolve, 800);
+        });
+        const retry = await worktree.api.status(sessionId);
+        setStatus(retry.ok === true ? retry : undefined);
+      } else {
+        setStatus(value);
+      }
     } catch {
       setStatus(undefined);
     } finally {
@@ -118,11 +127,11 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
   }, [refresh, cwd]);
 
   const variant = status?.isRepo && status.isWorktree ? 'worktree' : 'branch';
-  const label = !loading && status === undefined
-    ? t('trigger.noRepo')
-    : status?.isRepo === true
-      ? (status.isWorktree ? (status.worktreeName ?? status.branch ?? '') : (status.branch ?? t('trigger.detached')))
-      : (loading ? t('trigger.loading') : t('trigger.noRepo'));
+  const label = status?.isRepo === true
+    ? (status.isWorktree ? (status.worktreeName ?? status.branch ?? '') : (status.branch ?? t('trigger.detached')))
+    : loading === true
+      ? t('trigger.loading')
+      : (status === undefined ? t('trigger.loading') : t('trigger.noRepo'));
 
   return jsxs(Fragment, {
     children: [
