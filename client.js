@@ -961,8 +961,10 @@ class GitInfoStore {
  * or bottom and painting over the conversation. A ResizeObserver re-runs the
  * same placement whenever the panel's own box changes, and the final clamp keeps
  * both edges on screen.
+ * @param onPlacement - notified with `above`/`below` so the trigger chevron can
+ * point the way the panel actually opened.
  */
-function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
+function useAnchoredPanel(open, anchorRef, panelRef, gap = 6, onPlacement = undefined) {
   useEffect(() => {
     if (!open) return;
     let raf = 0;
@@ -978,12 +980,15 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
       const roomAbove = a.top - gap - margin;
       const roomBelow = window.innerHeight - a.bottom - gap - margin;
       // Prefer above the composer; flip below when the panel no longer fits.
-      let top = roomAbove >= height ? a.top - height - gap : (roomBelow >= height ? a.bottom + gap : Math.max(margin, window.innerHeight - height - margin));
+      const above = roomAbove >= height;
+      let top = above ? a.top - height - gap : (roomBelow >= height ? a.bottom + gap : Math.max(margin, window.innerHeight - height - margin));
       top = Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin));
       let left = a.right - width;
       left = Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin));
       panel.style.top = `${Math.round(top)}px`;
       panel.style.left = `${Math.round(left)}px`;
+      // The trigger chevron points the way the panel actually opened.
+      onPlacement?.(top < a.top ? 'above' : 'below');
       if (settled === false && height > 0) {
         settled = true;
         panel.style.visibility = '';
@@ -1005,7 +1010,7 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
       window.removeEventListener('resize', update);
       document.removeEventListener('scroll', update, true);
     };
-  }, [open, gap, anchorRef, panelRef]);
+  }, [open, gap, anchorRef, panelRef, onPlacement]);
 }
 
 /** Close on Escape and on pointer-down outside the anchor and panel. */
@@ -1058,10 +1063,12 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   const panelRef = useRef(null);
+  // Set by the anchoring effect: which side the panel took.
+  const [placement, setPlacement] = useState('above');
   const close = useCallback(() => {
     setOpen(false);
   }, []);
-  useAnchoredPanel(open, anchorRef, panelRef);
+  useAnchoredPanel(open, anchorRef, panelRef, 6, setPlacement);
   useDismiss(open, anchorRef, panelRef, close);
 
   const cwd = typeof useSessions === 'function'
@@ -1128,7 +1135,13 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
         children: [
           jsx('span', { className: 'dsh-wt-trigger-icon', children: variant === 'worktree' ? jsx(WorktreeIcon, {}) : jsx(BranchIcon, {}) }),
           jsx('span', { className: 'dsh-wt-trigger-label', children: label || t('trigger.loading') }),
-          jsx('span', { className: 'dsh-wt-trigger-chevron', children: jsx(ChevronIcon, { open: true, size: 14 }) }),
+          jsx('span', {
+            className: 'dsh-wt-trigger-chevron',
+            // Collapsed points down (the panel would open below); expanded points
+            // at whichever side the panel actually took.
+            'data-open': open === true ? 'true' : undefined,
+            children: jsx(ChevronIcon, { open: open === true && placement === 'above', size: 14 }),
+          }),
         ],
       }),
       open === true && createPortal(
