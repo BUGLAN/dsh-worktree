@@ -122,6 +122,8 @@ try {
   makeSession('s2', repo);
   /** Sessions with a durable header but no live Agent (the sidebar's usual case). */
   const coldSessions = new Map([['s1', repo], ['s2', repo], ['cold', repo]]);
+  /** Event logs behind `observeSession`, so blankness is computed like the Host does it. */
+  const sessionEvents = new Map();
 
   const ctx = {
     subprocess: {
@@ -152,7 +154,7 @@ try {
         if (cold === undefined) {
           throw Object.assign(new Error(`session "${id}" not found`), { code: 'SESSION_QUERY_SESSION_NOT_FOUND' });
         }
-        return { header: { id, cwd: cold }, [Symbol.dispose]: () => {} };
+        return { header: { id, cwd: cold }, events: sessionEvents.get(id) ?? [], [Symbol.dispose]: () => {} };
       },
     },
   };
@@ -166,6 +168,7 @@ try {
   check('status: main worktree listed', value.worktrees.length === 1 && value.worktrees[0].isMain === true);
   check('status: clean tree', value.dirtyCount === 0, `dirty=${String(value.dirtyCount)}`);
   check('status: not a worktree', value.isWorktree === false);
+  check('status: trunk branch reported', value.trunkBranch === 'main', `trunk=${String(value.trunkBranch)}`);
 
   value = await service.status('missing');
   check('status: unknown session fails structured', value.ok === false && value.code === 'session-unavailable');
@@ -243,6 +246,25 @@ try {
   check('enterWorktree: restart worktree name', afterRestart.worktreeName === basename(worktreePath));
   restarted.dispose();
 
+  // --- blankness decides who may relocate ----------------------------------
+  // A session with no `turn/start` event is pristine: its directory may follow
+  // a branch into the checkout that holds it. A session with a turn in its log
+  // keeps its directory — only in-place branch switches remain.
+  value = await service.status('s1');
+  check('status: fresh session blank', value.ok === true && value.blank === true);
+  sessionEvents.set('s1', [{ type: 'turn/start', seq: 0, data: {} }]);
+  service.cache.delete('blank:s1');
+  value = await service.status('s1');
+  check('status: started session not blank', value.ok === true && value.blank === false);
+  makeSession('s4', repo);
+  coldSessions.set('s4', repo);
+  value = await service.enterWorktree({ sessionId: 's4', path: worktreePath });
+  check('enterWorktree: blank session may move', value.ok === true, JSON.stringify(value));
+  sessionEvents.set('s4', [{ type: 'turn/start', seq: 0, data: {} }, { type: 'turn/end', seq: 1, data: {} }]);
+  value = await service.enterWorktree({ sessionId: 's4', path: repo });
+  check('enterWorktree: started session refused', value.ok === false && value.code === 'session-not-blank', JSON.stringify(value));
+  sessions.delete('s4');
+
   // --- switchBranch: occupied ----------------------------------------------
   value = await service.switchBranch({ sessionId: 's1', branch: 'task-1' });
   check('switch: occupied detected', value.ok === false && value.code === 'branch-occupied' && value.occupiedPath === worktreePath, JSON.stringify(value));
@@ -297,6 +319,19 @@ try {
   const taskBranch = value.branches.find((entry) => entry.name === 'task-1');
   check('status: foreign worktree branch carries occupiedPath', taskBranch?.occupiedPath === worktreePath, JSON.stringify(taskBranch));
   check('status: own branches have no occupiedPath', value.branches.filter((entry) => entry.name !== 'task-1').every((entry) => entry.occupiedPath == null));
+
+  // --- branch lineage: birth checkout drives family scoping ----------------
+  // A worktree's own branch is born into the worktree; a branch created in the
+  // main checkout is born there; a branch with no record defaults to the main
+  // family (the Client treats null as main-checkout origin).
+  check('lineage: worktree branch born in its worktree', taskBranch?.origin === worktreePath, JSON.stringify(taskBranch));
+  const inplaceBranch = value.branches.find((entry) => entry.name === 'inplace-1');
+  check('lineage: in-place branch born in main checkout', inplaceBranch?.origin === repo, JSON.stringify(inplaceBranch));
+  check('lineage: unrecorded branch has null origin', value.branches.find((entry) => entry.name === 'main')?.origin == null);
+  const restartedLineage = new WorktreeService(ctx, resolveOptions({ poolDirectory: pool }));
+  const lineageAfter = await restartedLineage.status('s1');
+  check('lineage: record survives restart', lineageAfter.branches.find((entry) => entry.name === 'task-1')?.origin === worktreePath);
+  restartedLineage.dispose();
 
   // --- worktree identity: main checkout is never a worktree --------------
   value = await service.gitInfo([repo, worktreePath]);

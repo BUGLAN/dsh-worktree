@@ -241,23 +241,21 @@ function endpointOf(name) {
  */
 
 const en = {
-  'row.moveTo': "Move to {name}",
-  'hint.relocated': "Moved to {name} · {branch}",
-  'create.prefixHint': "Checkout directory created for this worktree",
+  'error.notBlank': "This session has already started, so its working directory cannot change. Switch branches in place instead.",
   'create.previewHint': "Branch name as stored: slashes become dashes in the label",
   'create.branchPlaceholder': "New branch name, e.g. feature/login",
   'create.worktreePlaceholder': "Worktree branch name",
   'create.branchAction': "Branch",
   'create.worktreeAction': "Permanent worktree",
-  'create.branchTitle': "Create and check out a branch here",
+  'create.branchTitle': "Create and switch to a new branch",
   'create.worktreeTitle': "Create a permanent worktree",
   'create.branchSubmit': "Create branch",
   'create.worktreeSubmit': "Create worktree",
   'create.submitting': "Creating…",
-  'create.branchOk': "Created and checked out {branch}",
+  'create.branchOk': "Created and switched to {branch}",
   'create.worktreeOk': "Created worktree for {branch} at {path}",
   'confirm.dirtyCreate.title': "Uncommitted changes",
-  'confirm.dirtyCreate.body': "This checkout has {n} uncommitted change(s). Branch {branch} keeps them as uncommitted work.",
+  'confirm.dirtyCreate.body': "This working tree has {n} uncommitted change(s). Branch {branch} keeps them as uncommitted work.",
   'confirm.dirtyCreate.proceed': "Create anyway",
   'trigger.branch': 'Branch',
   'trigger.detached': 'Detached',
@@ -279,15 +277,11 @@ const en = {
   'status.upstream': 'Tracks {upstream}',
   'status.noUpstream': 'No upstream branch',
   'status.worktreeOf': 'Worktree of {branch}',
-  'status.mainCheckout': 'Main checkout',
   'row.current': 'Current',
   'row.here': 'here',
-  'row.occupied': 'Checked out in {name}',
   'row.hasLocal': 'Local branch exists',
   'row.openSession': 'Open session in this worktree',
   'row.remove': 'Remove this worktree',
-  'row.enter': 'Move current session here',
-  'create.title': 'Create and check out new branch',
   'create.namePlaceholder': 'Branch name, e.g. feature/login',
   'create.from': 'Start from',
   'create.fromHead': 'Current HEAD',
@@ -298,12 +292,12 @@ const en = {
   'action.opening': 'Opening…',
   'action.removing': 'Removing…',
   'confirm.dirty.title': 'Uncommitted changes',
-  'confirm.dirty.body': 'This checkout has {n} uncommitted change(s). Switching carries them to the new branch; Git refuses when they conflict.',
+  'confirm.dirty.body': 'This working tree has {n} uncommitted change(s). Switching carries them to the new branch; Git refuses when they conflict.',
   'confirm.dirty.proceed': 'Switch anyway',
   'confirm.dirty.worktree': 'Create worktree instead',
-  'confirm.occupied.title': 'Branch already checked out',
-  'confirm.occupied.body': 'Branch {branch} is checked out in worktree {name}. Git cannot check it out in two places.',
-  'confirm.occupied.open': 'Open that worktree',
+  'confirm.occupied.title': 'Cannot switch to this branch',
+  'confirm.occupied.body': 'Branch {branch} already belongs to worktree {name}; one branch cannot live in two worktrees at once.',
+  'confirm.occupied.open': 'Go to that worktree',
   'confirm.remove.title': 'Remove worktree',
   'confirm.remove.body': 'Remove {name}? Uncommitted changes in it are lost.',
   'confirm.remove.proceed': 'Remove',
@@ -321,7 +315,6 @@ const en = {
   'error.unexpected': 'Something went wrong.',
   'hint.switchDone': 'Now on {branch}',
   'hint.trackingCreated': 'Created local branch {branch} tracking {upstream}',
-  'hint.enterDone': 'Session moved into {path}',
   'hint.sessionOpened': 'Opened a session in {name}',
   'hint.removed': 'Removed {name}',
   'header.worktree': '{branch} · worktree {name}',
@@ -334,23 +327,21 @@ const en = {
 };
 
 const zh = {
-  'row.moveTo': "迁移到 {name}",
-  'hint.relocated': "已迁移到 {name} · {branch}",
-  'create.prefixHint': "此工作树的检出目录",
+  'error.notBlank': "该会话已有工作记录，工作目录不能更改。请就地切换分支。",
   'create.previewHint': "分支名中的斜杠在显示时转为短横线",
   'create.branchPlaceholder': "新分支名，例如 feature/login",
   'create.worktreePlaceholder': "工作树分支名",
   'create.branchAction': "分支",
   'create.worktreeAction': "永久工作树",
-  'create.branchTitle': "在当前检出创建并迁出分支",
+  'create.branchTitle': "创建并切换到新分支",
   'create.worktreeTitle': "创建永久工作树",
   'create.branchSubmit': "创建分支",
   'create.worktreeSubmit': "创建工作树",
   'create.submitting': "创建中…",
-  'create.branchOk': "已创建并迁出分支 {branch}",
+  'create.branchOk': "已创建并切换到分支 {branch}",
   'create.worktreeOk': "已为 {branch} 创建永久工作树：{path}",
   'confirm.dirtyCreate.title': "存在未提交更改",
-  'confirm.dirtyCreate.body': "当前检出有 {n} 个未提交更改。分支 {branch} 会把这些更改作为未提交内容保留。",
+  'confirm.dirtyCreate.body': "当前工作区有 {n} 个未提交更改。分支 {branch} 会把这些更改作为未提交内容保留。",
   'confirm.dirtyCreate.proceed': "仍然创建",
   'trigger.branch': '分支',
   'trigger.detached': '分离头指针',
@@ -372,15 +363,11 @@ const zh = {
   'status.upstream': '跟踪 {upstream}',
   'status.noUpstream': '未设置上游分支',
   'status.worktreeOf': '分支 {branch} 的 worktree',
-  'status.mainCheckout': '主检出',
   'row.current': '当前',
   'row.here': '当前',
-  'row.occupied': '检出位于 {name}',
   'row.hasLocal': '已有对应本地分支',
   'row.openSession': '在此 worktree 中打开会话',
   'row.remove': '移除此 worktree',
-  'row.enter': '当前会话进入该目录',
-  'create.title': '创建并检出新分支',
   'create.namePlaceholder': '分支名，例如 feature/login',
   'create.from': '起点',
   'create.fromHead': '当前 HEAD',
@@ -391,12 +378,12 @@ const zh = {
   'action.opening': '打开中…',
   'action.removing': '移除中…',
   'confirm.dirty.title': '存在未提交更改',
-  'confirm.dirty.body': '当前检出有 {n} 个未提交更改。切换分支会把这些更改带到目标分支；如有冲突 Git 会拒绝切换。',
+  'confirm.dirty.body': '当前工作区有 {n} 个未提交更改。切换分支会把这些更改带到目标分支；如有冲突 Git 会拒绝切换。',
   'confirm.dirty.proceed': '仍要切换',
   'confirm.dirty.worktree': '改为创建 worktree',
-  'confirm.occupied.title': '分支已被检出',
-  'confirm.occupied.body': '分支 {branch} 已在 worktree {name} 中检出，Git 不允许同一分支在两处检出。',
-  'confirm.occupied.open': '打开该 worktree',
+  'confirm.occupied.title': '无法切换到该分支',
+  'confirm.occupied.body': '分支 {branch} 已属于工作树 {name}，一个分支不能同时出现在两个工作树里。',
+  'confirm.occupied.open': '去那个工作树',
   'confirm.remove.title': '移除 worktree',
   'confirm.remove.body': '移除 {name}？其中未提交的更改会一并丢失。',
   'confirm.remove.proceed': '移除',
@@ -414,7 +401,6 @@ const zh = {
   'error.unexpected': '发生未知错误。',
   'hint.switchDone': '已切换到 {branch}',
   'hint.trackingCreated': '已创建本地分支 {branch}，跟踪 {upstream}',
-  'hint.enterDone': '会话已进入 {path}',
   'hint.sessionOpened': '已在 {name} 中打开会话',
   'hint.removed': '已移除 {name}',
   'header.worktree': '{branch} · worktree {name}',
@@ -488,8 +474,8 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-section-title::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--dsw-alias-border-l1),transparent)}
 .dsh-wt-panel .dsh-wt-section-title .dsh-wt-section-extra{margin-left:0;font-family:inherit;font-weight:400;text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;font-size:10px;opacity:.75}
 
-/* branch rows: icon colour only; the label keeps full contrast */
-.dsh-wt-panel .dsh-wt-row[data-kind="worktree"] .dsh-wt-row-icon,.dsh-wt-panel .dsh-wt-row-icon[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
+/* branch rows: icon colour only; the label keeps full contrast; a worktree-held branch keeps its worktree mark, every row means switch */
+.dsh-wt-panel .dsh-wt-row-icon[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
 
 /* rows */
 .dsh-wt-panel .dsh-wt-row{display:flex;align-items:center;gap:8px;width:100%;padding:5px 11px;margin:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;text-align:left;cursor:pointer;border-radius:0;animation:dsh-wt-row-in .16s ease both}
@@ -1154,6 +1140,12 @@ const baseName = (path) => {
 
 const dirtyLabel = (t, count) => (count === null || count === undefined ? null : t('status.dirty', { n: String(count) }));
 
+/** Compare two directory spellings loosely, ignoring separators and case. */
+const sameDirectory = (left, right) => {
+  const normalize = (value) => (typeof value === 'string' ? value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : '');
+  return left !== undefined && left !== null && right !== undefined && right !== null && normalize(left) === normalize(right) && normalize(left) !== '';
+};
+
 /** A fresh checkout directory name: `wt-` plus four lowercase hex digits. */
 const makeWorktreeId = () => {
   const bytes = new Uint8Array(2);
@@ -1183,6 +1175,10 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const cwd = typeof useSessions === 'function'
     ? useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd)
     : undefined;
+  // Whether this session has started any turn — the framework's own list
+  // metadata, updated as soon as the first `turn/start` event commits. Only a
+  // blank session may be relocated into another checkout; once work exists the
+  // directory is part of the session's identity.
   const sessionBlank = typeof useSessions === 'function'
     ? useSessions((snapshot) => snapshot?.byId?.[sessionId]?.blank)
     : undefined;
@@ -1432,19 +1428,19 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
   }, [api, sessionId, afterMutation, fail, t]);
 
   /**
-   * Move a pristine session into the checkout that holds `branch`, then switch
-   * to that branch there.
+   * Switch a pristine session onto `branch`, wherever it lives.
    *
-   * Picking `wt-1a2b/feat-x` from the picker means "work on feat-x", and that
-   * branch is only checked out inside `wt-1a2b`. The directory therefore follows
-   * the branch: moving the session is the operation, and the switch is a no-op
-   * confirmation because the target checkout already has it checked out.
+   * Picking `wt-1a2b/feat-x` from the picker means "switch to feat-x", and that
+   * branch only exists inside `wt-1a2b`. For a session that has not started
+   * any turn the switch therefore carries the directory with it — the session
+   * lands in `wt-1a2b` with feat-x already waiting. No dirty consent is asked:
+   * the old checkout and its uncommitted state are left untouched.
    * @param branch - branch entry from the picker, with its owning worktree.
    */
   const relocateTo = useCallback(async (branch) => {
-    const target = branch?.worktree?.path;
+    const target = branch.worktree?.path ?? branch.occupiedPath;
     if (typeof target !== 'string' || target.length === 0) {
-      // No owning worktree means the branch lives in this checkout after all.
+      // No owning checkout means the branch lives here after all: switch in place.
       await switchTo(branch.name);
       return;
     }
@@ -1456,6 +1452,8 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
       if (value.ok !== true) {
         if (value.code === 'session-unavailable') {
           fail(t('error.switchFailed'), { message: t('error.sessionUnavailable') });
+        } else if (value.code === 'session-not-blank') {
+          fail(t('error.switchFailed'), { message: t('error.notBlank') });
         } else {
           fail(t('error.switchFailed'), value);
         }
@@ -1464,7 +1462,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
       // The directory changed: refresh this session's facts immediately so the
       // trigger and the row mark show the new worktree without waiting.
       store.invalidateSession(sessionId);
-      afterMutation(t('hint.relocated', { name: baseName(target), branch: branch.name }));
+      afterMutation(t('hint.switchDone', { branch: branch.name }));
     } catch (cause) {
       fail(t('error.switchFailed'), { message: cause instanceof Error ? cause.message : String(cause) });
     } finally {
@@ -1584,14 +1582,31 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
     for (const entry of status?.worktrees ?? []) {
       if (typeof entry.branch === 'string' && entry.inPool === true) byWorktree.set(entry.branch, entry);
     }
-    // Two audiences, one list:
-    //  - a pristine session may move anywhere, so every local branch is offered
-    //    and picking one from a pool checkout relocates the session with it;
-    //  - a session with work in it stays where it is, so only branches this
-    //    checkout can actually switch to are shown.
+    // Every local branch is offered to a pristine session, because picking any
+    // of them — free or held by a worktree — is how the new session chooses
+    // where it will work. A session that has already started sees branches by
+    // their birth family: its own branch, plus the branches this plugin
+    // created in this very checkout (the main repo's `a`, `b`, `c`; a
+    // worktree's `e`, `f`, `g`). Another checkout's family is never shown, and
+    // a branch held by another worktree cannot be switched to at all. A branch
+    // with no birth record was created outside the plugin: its family is
+    // unknowable, so it is not shown at all — only the session's own current
+    // branch row and the trunk survive without a record.
+    const home = status?.worktreePath ?? status?.repositoryRoot;
+    // The trunk branch is the main family's root: a main-checkout session
+    // always offers it, so switching back from a child stays possible. A
+    // worktree's root is covered by its own birth record instead.
+    const isMainCheckout = status?.isWorktree !== true;
+    const trunkBranch = isMainCheckout === true ? status?.trunkBranch : null;
     const locals = (status?.branches ?? [])
       .filter((branch) => branch.kind === 'local')
-      .filter((branch) => relocatable || branch.occupiedPath == null)
+      .filter((branch) => {
+        if (relocatable) return true;
+        if (branch.current === true) return true;
+        if (branch.occupiedPath != null) return false;
+        if (trunkBranch != null && branch.name === trunkBranch) return true;
+        return sameDirectory(branch.origin, home);
+      })
       .map((branch) => ({ ...branch, worktree: byWorktree.get(branch.name) ?? null }));
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
@@ -1729,10 +1744,15 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
                 className: 'dsh-wt-section',
                 children: branches.locals.map((branch, index) => {
                 const isCurrent = branch.current === true;
-                const busyRow = busy !== null && (busy.kind === 'switch' || busy.kind === 'relocate') && (busy.branch === branch.name || busy.path === branch.worktree?.path);
-                // A branch held by another checkout is reached by moving there,
-                // not by switching in place; the row's own worktree tells which.
-                const isElsewhere = branch.occupiedPath != null || (branch.worktree !== null && branch.worktree.isCurrent !== true);
+                // Match the busy row by branch name only: a switch action sets
+                // no `busy.path`, and comparing that against a worktree-free
+                // row's `undefined` worktree path lit a spinner on every plain
+                // branch row at once.
+                const busyRow = busy !== null && (busy.kind === 'switch' || busy.kind === 'relocate') && busy.branch === branch.name;
+                // An occupied row reaches the list only for a pristine session,
+                // where picking it moves the session into the checkout that
+                // holds the branch; a started session never sees these rows.
+                const isOccupied = branch.occupiedPath != null;
                 return jsxs('button', {
                   type: 'button',
                   className: 'dsh-wt-row',
@@ -1742,15 +1762,21 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
                   // than a greyed-out row.
                   'aria-disabled': isCurrent === true ? 'true' : undefined,
                   'data-current': isCurrent === true ? 'true' : undefined,
-                  'data-kind': isElsewhere === true ? 'elsewhere' : undefined,
                   style: { animationDelay: `${String(Math.min(index, 8) * 14)}ms` },
                   'data-testid': `dsh-worktree-branch-${branch.name}`,
                   onClick: () => {
                     if (isCurrent === true) return;
-                    if (isElsewhere === true) {
+                    if (isOccupied === true) {
+                      // The session is still pristine, so its directory may
+                      // follow the branch into the checkout that holds it.
                       void relocateTo(branch);
                       return;
                     }
+                    // One action behind every other row: ask the Host to put this
+                    // checkout on that branch. Dirty trees and conflicts come
+                    // back as structured codes the panel already turns into a
+                    // confirm step, so the click never silently changes the
+                    // session's directory.
                     void switchTo(branch.name);
                   },
                   children: [
@@ -1778,9 +1804,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
                         }),
                         isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
                           ? jsx('span', { className: 'dsh-wt-row-sub', 'data-tone': 'warn', children: dirtyLabel(t, currentDirty) })
-                          : isElsewhere === true
-                            ? jsx('span', { className: 'dsh-wt-row-sub', children: t('row.moveTo', { name: baseName(branch.worktree?.path ?? branch.occupiedPath ?? '') }) })
-                            : null,
+                          : null,
                       ],
                     }),
                     isCurrent === true && jsx('span', { className: 'dsh-wt-row-check', children: jsx(CheckIcon, { size: 14 }) }),

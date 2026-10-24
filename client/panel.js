@@ -101,6 +101,12 @@ const baseName = (path) => {
 
 const dirtyLabel = (t, count) => (count === null || count === undefined ? null : t('status.dirty', { n: String(count) }));
 
+/** Compare two directory spellings loosely, ignoring separators and case. */
+const sameDirectory = (left, right) => {
+  const normalize = (value) => (typeof value === 'string' ? value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : '');
+  return left !== undefined && left !== null && right !== undefined && right !== null && normalize(left) === normalize(right) && normalize(left) !== '';
+};
+
 /** A fresh checkout directory name: `wt-` plus four lowercase hex digits. */
 const makeWorktreeId = () => {
   const bytes = new Uint8Array(2);
@@ -130,6 +136,10 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const cwd = typeof useSessions === 'function'
     ? useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd)
     : undefined;
+  // Whether this session has started any turn — the framework's own list
+  // metadata, updated as soon as the first `turn/start` event commits. Only a
+  // blank session may be relocated into another checkout; once work exists the
+  // directory is part of the session's identity.
   const sessionBlank = typeof useSessions === 'function'
     ? useSessions((snapshot) => snapshot?.byId?.[sessionId]?.blank)
     : undefined;
@@ -379,19 +389,19 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
   }, [api, sessionId, afterMutation, fail, t]);
 
   /**
-   * Move a pristine session into the checkout that holds `branch`, then switch
-   * to that branch there.
+   * Switch a pristine session onto `branch`, wherever it lives.
    *
-   * Picking `wt-1a2b/feat-x` from the picker means "work on feat-x", and that
-   * branch is only checked out inside `wt-1a2b`. The directory therefore follows
-   * the branch: moving the session is the operation, and the switch is a no-op
-   * confirmation because the target checkout already has it checked out.
+   * Picking `wt-1a2b/feat-x` from the picker means "switch to feat-x", and that
+   * branch only exists inside `wt-1a2b`. For a session that has not started
+   * any turn the switch therefore carries the directory with it — the session
+   * lands in `wt-1a2b` with feat-x already waiting. No dirty consent is asked:
+   * the old checkout and its uncommitted state are left untouched.
    * @param branch - branch entry from the picker, with its owning worktree.
    */
   const relocateTo = useCallback(async (branch) => {
-    const target = branch?.worktree?.path;
+    const target = branch.worktree?.path ?? branch.occupiedPath;
     if (typeof target !== 'string' || target.length === 0) {
-      // No owning worktree means the branch lives in this checkout after all.
+      // No owning checkout means the branch lives here after all: switch in place.
       await switchTo(branch.name);
       return;
     }
@@ -403,6 +413,8 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
       if (value.ok !== true) {
         if (value.code === 'session-unavailable') {
           fail(t('error.switchFailed'), { message: t('error.sessionUnavailable') });
+        } else if (value.code === 'session-not-blank') {
+          fail(t('error.switchFailed'), { message: t('error.notBlank') });
         } else {
           fail(t('error.switchFailed'), value);
         }
@@ -411,7 +423,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
       // The directory changed: refresh this session's facts immediately so the
       // trigger and the row mark show the new worktree without waiting.
       store.invalidateSession(sessionId);
-      afterMutation(t('hint.relocated', { name: baseName(target), branch: branch.name }));
+      afterMutation(t('hint.switchDone', { branch: branch.name }));
     } catch (cause) {
       fail(t('error.switchFailed'), { message: cause instanceof Error ? cause.message : String(cause) });
     } finally {
@@ -531,14 +543,31 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
     for (const entry of status?.worktrees ?? []) {
       if (typeof entry.branch === 'string' && entry.inPool === true) byWorktree.set(entry.branch, entry);
     }
-    // Two audiences, one list:
-    //  - a pristine session may move anywhere, so every local branch is offered
-    //    and picking one from a pool checkout relocates the session with it;
-    //  - a session with work in it stays where it is, so only branches this
-    //    checkout can actually switch to are shown.
+    // Every local branch is offered to a pristine session, because picking any
+    // of them — free or held by a worktree — is how the new session chooses
+    // where it will work. A session that has already started sees branches by
+    // their birth family: its own branch, plus the branches this plugin
+    // created in this very checkout (the main repo's `a`, `b`, `c`; a
+    // worktree's `e`, `f`, `g`). Another checkout's family is never shown, and
+    // a branch held by another worktree cannot be switched to at all. A branch
+    // with no birth record was created outside the plugin: its family is
+    // unknowable, so it is not shown at all — only the session's own current
+    // branch row and the trunk survive without a record.
+    const home = status?.worktreePath ?? status?.repositoryRoot;
+    // The trunk branch is the main family's root: a main-checkout session
+    // always offers it, so switching back from a child stays possible. A
+    // worktree's root is covered by its own birth record instead.
+    const isMainCheckout = status?.isWorktree !== true;
+    const trunkBranch = isMainCheckout === true ? status?.trunkBranch : null;
     const locals = (status?.branches ?? [])
       .filter((branch) => branch.kind === 'local')
-      .filter((branch) => relocatable || branch.occupiedPath == null)
+      .filter((branch) => {
+        if (relocatable) return true;
+        if (branch.current === true) return true;
+        if (branch.occupiedPath != null) return false;
+        if (trunkBranch != null && branch.name === trunkBranch) return true;
+        return sameDirectory(branch.origin, home);
+      })
       .map((branch) => ({ ...branch, worktree: byWorktree.get(branch.name) ?? null }));
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
@@ -676,10 +705,15 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
                 className: 'dsh-wt-section',
                 children: branches.locals.map((branch, index) => {
                 const isCurrent = branch.current === true;
-                const busyRow = busy !== null && (busy.kind === 'switch' || busy.kind === 'relocate') && (busy.branch === branch.name || busy.path === branch.worktree?.path);
-                // A branch held by another checkout is reached by moving there,
-                // not by switching in place; the row's own worktree tells which.
-                const isElsewhere = branch.occupiedPath != null || (branch.worktree !== null && branch.worktree.isCurrent !== true);
+                // Match the busy row by branch name only: a switch action sets
+                // no `busy.path`, and comparing that against a worktree-free
+                // row's `undefined` worktree path lit a spinner on every plain
+                // branch row at once.
+                const busyRow = busy !== null && (busy.kind === 'switch' || busy.kind === 'relocate') && busy.branch === branch.name;
+                // An occupied row reaches the list only for a pristine session,
+                // where picking it moves the session into the checkout that
+                // holds the branch; a started session never sees these rows.
+                const isOccupied = branch.occupiedPath != null;
                 return jsxs('button', {
                   type: 'button',
                   className: 'dsh-wt-row',
@@ -689,15 +723,21 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
                   // than a greyed-out row.
                   'aria-disabled': isCurrent === true ? 'true' : undefined,
                   'data-current': isCurrent === true ? 'true' : undefined,
-                  'data-kind': isElsewhere === true ? 'elsewhere' : undefined,
                   style: { animationDelay: `${String(Math.min(index, 8) * 14)}ms` },
                   'data-testid': `dsh-worktree-branch-${branch.name}`,
                   onClick: () => {
                     if (isCurrent === true) return;
-                    if (isElsewhere === true) {
+                    if (isOccupied === true) {
+                      // The session is still pristine, so its directory may
+                      // follow the branch into the checkout that holds it.
                       void relocateTo(branch);
                       return;
                     }
+                    // One action behind every other row: ask the Host to put this
+                    // checkout on that branch. Dirty trees and conflicts come
+                    // back as structured codes the panel already turns into a
+                    // confirm step, so the click never silently changes the
+                    // session's directory.
                     void switchTo(branch.name);
                   },
                   children: [
@@ -725,9 +765,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
                         }),
                         isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
                           ? jsx('span', { className: 'dsh-wt-row-sub', 'data-tone': 'warn', children: dirtyLabel(t, currentDirty) })
-                          : isElsewhere === true
-                            ? jsx('span', { className: 'dsh-wt-row-sub', children: t('row.moveTo', { name: baseName(branch.worktree?.path ?? branch.occupiedPath ?? '') }) })
-                            : null,
+                          : null,
                       ],
                     }),
                     isCurrent === true && jsx('span', { className: 'dsh-wt-row-check', children: jsx(CheckIcon, { size: 14 }) }),

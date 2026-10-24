@@ -324,6 +324,19 @@ export class WorktreeService {
     this.sessionCheckouts = new Map();
     this.checkoutsLoaded = false;
     this.checkoutsWritePending = null;
+    /**
+     * Which checkout each branch was created in, keyed by repository.
+     *
+     * Git keeps no record of where a branch was born, but the picker's branch
+     * list is scoped by exactly that fact: a checkout shows its own branch plus
+     * the branches this plugin created inside it, never another checkout's
+     * family. Branches created outside the plugin carry no record — their
+     * family is unknowable, so the picker does not show them at all. Persisted
+     * next to the pool so it survives Host restarts.
+     */
+    this.branchLineage = new Map();
+    this.lineageLoaded = false;
+    this.lineageWritePending = null;
   }
 
   /** Path of the session→checkout map inside the pool directory. */
@@ -365,44 +378,123 @@ export class WorktreeService {
     return this.checkoutsWritePending;
   }
 
-  /**
-   * A best-effort guess at whether a session has started any turn.
-   *
-   * The authoritative flag lives in the framework's session snapshot, which the
-   * Client already receives; this is only a fallback for a stale snapshot. The
-   * durable header does not carry `blank` directly, so it is derived from the turn
-   * count when available. `undefined` means "cannot tell", which callers must treat
-   * as "not blank": relocating a session that may hold work is the destructive
-   * mistake, so uncertainty resolves to refusal.
-   * @param {string} sessionId - session identity from the Client.
-   * @param {AbortSignal} signal - operation cancellation.
-   * @returns true when no turn has run, otherwise false or undefined.
-   */
-  async sessionIsBlank(sessionId, signal) {
-    return this.cached(`blank:${sessionId}`, async () => {
-      const query = this.ctx.sessionQuery;
-      if (query === undefined || typeof query.observeSession !== 'function') return undefined;
-      let observed;
-      try {
-        observed = await query.observeSession(sessionId);
-        const header = observed?.header ?? {};
-        if (typeof header.blank === 'boolean') return header.blank;
-        const stats = header.stats ?? observed?.stats ?? {};
-        if (typeof stats.turns === 'number') return stats.turns === 0;
-        return undefined;
-      } catch {
-        return undefined;
-      } finally {
-        const dispose = observed?.[Symbol.dispose] ?? observed?.dispose;
-        if (typeof dispose === 'function') {
-          try {
-            dispose.call(observed);
-          } catch {
-            /* disposal is best effort */
+  /** Path of the branch-lineage map inside the pool directory. */
+  get branchLineagePath() {
+    return join(this.options.poolDirectory, '.branches.json');
+  }
+
+  /** Read the branch-lineage map once, tolerating a missing or broken file. */
+  async loadBranchLineage(signal) {
+    if (this.lineageLoaded) return;
+    this.lineageLoaded = true;
+    try {
+      const text = await readFile(this.branchLineagePath, 'utf8');
+      const parsed = JSON.parse(text);
+      const repos = typeof parsed === 'object' && parsed !== null ? parsed.repos : undefined;
+      if (typeof repos === 'object' && repos !== null) {
+        for (const [repoKey, branches] of Object.entries(repos)) {
+          if (typeof branches !== 'object' || branches === null) continue;
+          const repo = new Map();
+          for (const [branch, origin] of Object.entries(branches)) {
+            if (typeof origin === 'string' && origin.length > 0) repo.set(branch, origin);
           }
+          this.branchLineage.set(repoKey, repo);
         }
       }
-    });
+    } catch {
+      /* No map yet, or it is unreadable: start empty and rewrite on next record. */
+    }
+  }
+
+  /** Persist the branch-lineage map, coalescing concurrent writes. */
+  async saveBranchLineage() {
+    if (this.lineageWritePending !== null) return this.lineageWritePending;
+    const repos = {};
+    for (const [repoKey, branches] of this.branchLineage) {
+      repos[repoKey] = Object.fromEntries([...branches]);
+    }
+    this.lineageWritePending = (async () => {
+      try {
+        await mkdir(this.options.poolDirectory, { recursive: true });
+        await writeFile(this.branchLineagePath, `${JSON.stringify({ repos }, null, 2)}\n`, 'utf8');
+      } catch {
+        /* The map is an optimisation; losing it only costs re-recording on next creation. */
+      } finally {
+        this.lineageWritePending = null;
+      }
+    })();
+    return this.lineageWritePending;
+  }
+
+  /**
+   * Record that one branch was created in one checkout of one repository.
+   *
+   * `repoKey` is the repository's main-checkout path so every checkout of the
+   * same repository shares one table regardless of where the creating session
+   * sat; the origin is the checkout the branch was born in — its own worktree
+   * for a worktree's branch, the creating checkout for an in-place branch.
+   * @param {string} repoKey - main-checkout path of the repository.
+   * @param {string} branch - branch name.
+   * @param {string} origin - canonical path of the birth checkout.
+   */
+  async recordBranchOrigin(repoKey, branch, origin) {
+    await this.loadBranchLineage(undefined);
+    const repo = this.branchLineage.get(repoKey) ?? new Map();
+    this.branchLineage.set(repoKey, repo);
+    if (repo.get(branch) === origin) return;
+    repo.set(branch, origin);
+    await this.saveBranchLineage();
+  }
+
+  /**
+   * Whether one session has started any turn, recomputed from its event log.
+   *
+   * The framework's own list metadata defines a blank session as one whose log
+   * holds no `turn/start` event yet; the same rule is recomputed here from the
+   * `sessionQuery` observation lease so the Host can answer for sessions whose
+   * client summary has not arrived. `null` means "cannot tell", which callers
+   * must treat as "not blank": relocating a session that may hold work is the
+   * destructive mistake, so uncertainty resolves to refusal.
+   * @param {string} sessionId - session identity from the Client.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns true when no turn has run, false when one has, null when unknown.
+   */
+  async computeSessionBlank(sessionId, signal) {
+    const query = this.ctx.sessionQuery;
+    if (query === undefined || typeof query.observeSession !== 'function') return null;
+    let observed;
+    try {
+      observed = await query.observeSession(sessionId);
+      const header = observed?.header ?? {};
+      if (typeof header.blank === 'boolean') return header.blank;
+      const events = observed?.events;
+      if (Array.isArray(events)) return !events.some((event) => event?.type === 'turn/start');
+      return null;
+    } catch {
+      return null;
+    } finally {
+      // `observeSession` hands out a disposable snapshot; release it so a read
+      // never pins a session log open.
+      const dispose = observed?.[Symbol.dispose] ?? observed?.dispose;
+      if (typeof dispose === 'function') {
+        try {
+          dispose.call(observed);
+        } catch {
+          /* disposal is best effort */
+        }
+      }
+    }
+  }
+
+  /**
+   * Cached blankness for the panel snapshot; a move request reads it fresh.
+   *
+   * @param {string} sessionId - session identity from the Client.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns the cached {@link computeSessionBlank} answer.
+   */
+  async sessionIsBlank(sessionId, signal) {
+    return this.cached(`blank:${sessionId}`, async () => this.computeSessionBlank(sessionId, signal));
   }
 
   /**
@@ -796,14 +888,35 @@ export class WorktreeService {
         const [name = '', upstream = ''] = line.split('\t');
         return { name, upstream: upstream.length === 0 ? null : upstream };
       });
+    // The trunk branch of the repository: the one a main-checkout session
+    // always offers, so switching back stays possible no matter how far onto
+    // its children the session has moved. `origin/HEAD` is the authoritative
+    // spelling; without it fall back to the conventional names, then to
+    // whatever the main checkout holds.
+    const trunkBranch = await this.cached(`trunk:${state.repositoryRoot}`, async () => {
+      try {
+        const remoteHead = await this.git(state.repositoryRoot, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], { signal: bound, allowedExitCodes: [0, 1] });
+        const short = remoteHead.stdout.trim().replace(/^refs\/remotes\/[^/]+\//, '');
+        if (short.length > 0) return short;
+      } catch {
+        /* No remote HEAD: fall through to the conventional names. */
+      }
+      return ['main', 'master'].find((name) => heads.some((entry) => entry.name === name)) ?? worktrees[0]?.branch ?? null;
+    });
     // Every local branch of the repository, each annotated with the checkout
-    // that already holds it. Deciding what the picker shows is a presentation
-    // concern, so that filter lives in the Client; the Host reports facts only.
+    // that already holds it and the checkout it was born in. Deciding what the
+    // picker shows is a presentation concern, so that filter lives in the
+    // Client; the Host reports facts only.
+    await this.loadBranchLineage(bound);
+    const repoKey = worktrees[0]?.path ?? state.repositoryRoot;
+    const lineageRepo = this.branchLineage.get(repoKey)
+      ?? [...this.branchLineage.entries()].find(([key]) => samePath(key, repoKey))?.[1];
     const branches = heads.map((entry) => ({
       name: entry.name,
       kind: 'local',
       current: entry.name === status.branch,
       upstream: entry.upstream,
+      origin: lineageRepo?.get(entry.name) ?? null,
       occupiedPath: worktrees.find((worktree) => worktree.branch === entry.name && !samePath(worktree.path, currentWorktreePath))?.path ?? null,
     }));
     const poolEntries = worktrees.map((entry, index) => ({
@@ -848,6 +961,7 @@ export class WorktreeService {
       branches,
       worktrees: poolEntries,
       poolPath,
+      trunkBranch,
     };
   }
 
@@ -926,6 +1040,9 @@ export class WorktreeService {
       return failure('switch-failed', `Git could not create branch ${name}.`, { branch: name, detail: excerpt(stderr) });
     }
     this.invalidateCheckouts();
+    // The branch was born in this checkout: record it so the picker can tell
+    // which checkout's family it belongs to.
+    await this.recordBranchOrigin(worktrees[0]?.path ?? state.repositoryRoot, name, state.repositoryRoot);
     return { ok: true, branch: name, mode: 'created', dirtyCount: status.dirtyCount, carried: status.dirtyCount > 0 };
   }
 
@@ -1017,6 +1134,10 @@ export class WorktreeService {
       return failure('switch-failed', `Git could not switch to ${branch}.`, { branch, detail: excerpt(stderr) });
     }
     this.invalidateCheckouts();
+    if (remoteTracking !== null) {
+      // A tracking branch was born here: record its family like any other.
+      await this.recordBranchOrigin(worktrees[0]?.path ?? state.repositoryRoot, branch, state.repositoryRoot);
+    }
     return {
       ok: true,
       branch,
@@ -1129,6 +1250,10 @@ export class WorktreeService {
         }
       }
       this.invalidateCheckouts();
+      // The worktree's own branch is born into the worktree itself: its family
+      // root is this checkout, not the checkout that created it.
+      const repoKey = (await this.worktreeList(state.repositoryRoot, bound))[0]?.path ?? state.repositoryRoot;
+      await this.recordBranchOrigin(repoKey, name, destination);
       return {
         ok: true,
         path: destination,
@@ -1190,6 +1315,20 @@ export class WorktreeService {
     const bound = this.bind(signal);
     const checkout = await this.checkoutOf(request.sessionId, bound);
     if (checkout.ok === false) return checkout;
+    // An existing session's working directory is its identity: once a turn has
+    // run in it, the checkout may only switch branches in place. Only a session
+    // that has not started any turn may be relocated into another checkout, so
+    // a positively non-blank session is refused here. Blankness that cannot be
+    // determined (null) stays allowed: the legitimate relocation flows move
+    // freshly created sessions, and refusing them on an introspection hiccup
+    // would break worktree creation instead of protecting it.
+    const blank = await this.computeSessionBlank(request.sessionId, bound);
+    if (blank === false) {
+      return failure('session-not-blank', 'This session has already started, so its working directory cannot change.', {
+        sessionId: request.sessionId,
+        hint: 'Switch branches in place instead, or open the other worktree as its own session.',
+      });
+    }
     let directory;
     try {
       directory = await this.canonical(request.path, undefined, bound);
