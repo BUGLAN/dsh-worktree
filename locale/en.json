@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "title": "Worktree & Branch",
+    "description": "Git branch and worktree picker in the composer toolbar, with a parallel-task worktree pool under ~/.dsh-worktree, plus branch/worktree markers in the sidebar and session header."
+  },
+  "title": "Worktree & Branch",
+  "composer": {
+    "trigger": "Branch: {branch}",
+    "worktreeTrigger": "Worktree: {name}"
+  }
+}

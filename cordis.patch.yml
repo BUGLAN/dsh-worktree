@@ -1,0 +1,9 @@
+# dsh-worktree: branch & worktree picker in the Web UI.
+#
+# One row owns both halves: the Host service (git operations under the
+# ~/.dsh-worktree pool) and the Client module (composer entry, branch panel,
+# sidebar decorations, session header chip).
+- insert:
+    - id: worktree-ui
+      name: dsh-worktree
+      config: {}

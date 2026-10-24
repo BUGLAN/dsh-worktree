@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "title": "Worktree 与分支",
+    "description": "在输入框工具栏提供 Git 分支/worktree 选择器，worktree 统一放在 ~/.dsh-worktree 以支持多任务并行开发，并在侧边栏和会话头部显示分支/worktree 标记。"
+  },
+  "title": "Worktree 与分支",
+  "composer": {
+    "trigger": "分支：{branch}",
+    "worktreeTrigger": "Worktree：{name}"
+  }
+}
