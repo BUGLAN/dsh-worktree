@@ -18,8 +18,12 @@ import { WorktreeService, resolveOptions } from '../index.js';
 
 const cleanEnv = (env) => Object.fromEntries(Object.entries(env ?? {}).filter(([, value]) => value !== undefined));
 
+/** Counts Git processes so cache behaviour can be asserted on real work. */
+let gitCalls = 0;
+
 /** Minimal adapter over child_process matching the DSH subprocess child face. */
 function realSpawn(spec) {
+  gitCalls += 1;
   const child = spawn(spec.argv[0], spec.argv.slice(1), {
     cwd: spec.cwd,
     env: { ...process.env, ...cleanEnv(spec.env) },
@@ -116,6 +120,8 @@ try {
   };
   makeSession('s1', repo);
   makeSession('s2', repo);
+  /** Sessions with a durable header but no live Agent (the sidebar's usual case). */
+  const coldSessions = new Map([['s1', repo], ['s2', repo], ['cold', repo]]);
 
   const ctx = {
     subprocess: {
@@ -137,6 +143,18 @@ try {
     },
     workingDirectory,
     agents: { get: (id) => sessions.get(id) },
+    // Cold reads: a session absent from `agents` still has a durable header with
+    // the directory it last ran in. The sidebar depends on this so every row can
+    // answer, not only the row whose Agent is warm.
+    sessionQuery: {
+      observeSession: async (id) => {
+        const cold = coldSessions.get(id);
+        if (cold === undefined) {
+          throw Object.assign(new Error(`session "${id}" not found`), { code: 'SESSION_QUERY_SESSION_NOT_FOUND' });
+        }
+        return { header: { id, cwd: cold }, [Symbol.dispose]: () => {} };
+      },
+    },
   };
   const service = new WorktreeService(ctx, resolveOptions({ poolDirectory: pool }));
 
@@ -150,7 +168,26 @@ try {
   check('status: not a worktree', value.isWorktree === false);
 
   value = await service.status('missing');
-  check('status: cold session fails structured', value.ok === false && value.code === 'session-unavailable');
+  check('status: unknown session fails structured', value.ok === false && value.code === 'session-unavailable');
+
+  // A session whose Agent is not open must still answer: the sidebar asks about
+  // every row, and only one of them can be the live one.
+  value = await service.status('cold');
+  check('status: cold session resolves', value.ok === true && value.isRepo === true, JSON.stringify(value).slice(0, 160));
+  check('status: cold session branch', value.branch === 'main');
+
+  // --- cache: bounded LRU, warm on repeat ---------------------------------
+  const statsOf = () => ({ git: gitCalls, size: service.cache.size });
+  statsOf();
+  await service.status('s1');
+  const afterWarmup = gitCalls;
+  await service.status('s1');
+  check('cache: repeat status costs no git', gitCalls === afterWarmup, `calls before=${String(afterWarmup)} after=${String(gitCalls)}`);
+  check('cache: bounded by capacity', service.cache.size <= 256, `size=${String(service.cache.size)}`);
+  service.invalidateCheckouts();
+  const beforeMutation = gitCalls;
+  await service.status('s1');
+  check('cache: mutation invalidates checkout facts', gitCalls > beforeMutation);
 
   // --- gitInfo ------------------------------------------------------------
   value = await service.gitInfo([repo, join(pool, 'nope')]);

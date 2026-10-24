@@ -52,6 +52,10 @@ const DEFAULTS = Object.freeze({
   graceMs: 3_000,
   maxOutputBytes: 65_536,
   cacheTtlMs: 8_000,
+  // The panel asks for one session at a time and users hop between a handful of
+  // them; 256 entries keeps every recently seen checkout warm without letting a
+  // long-lived Host accumulate one entry per session forever.
+  cacheCapacity: 256,
 });
 
 /** One failed Git invocation, carrying its exit code and captured stderr. */
@@ -90,6 +94,13 @@ export function resolveOptions(config) {
     }
     return value;
   };
+  const readCacheCapacity = () => {
+    const value = raw.cacheCapacity ?? DEFAULTS.cacheCapacity;
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new Error('dsh-worktree: cacheCapacity must be a positive integer');
+    }
+    return value;
+  };
   const gitCommand = raw.gitCommand ?? DEFAULTS.gitCommand;
   if (typeof gitCommand !== 'string' || gitCommand.trim().length === 0) throw new Error('dsh-worktree: gitCommand must not be empty');
   return Object.freeze({
@@ -99,6 +110,7 @@ export function resolveOptions(config) {
     graceMs: readPositiveInteger('graceMs'),
     maxOutputBytes: readPositiveInteger('maxOutputBytes'),
     cacheTtlMs: readCacheTtl(),
+    cacheCapacity: readCacheCapacity(),
   });
 }
 
@@ -216,6 +228,76 @@ function failure(code, message, extra = {}) {
 }
 
 /**
+ * Bounded least-recently-used map with per-entry expiry.
+ *
+ * The service answers the same questions over and over: every sidebar row asks
+ * for its session's checkout, and switching sessions re-asks for the same few
+ * directories. An unbounded TTL map would grow with the number of sessions and
+ * would be wiped wholesale on every mutation, so repeated switches paid full Git
+ * cost again. This keeps the hot set, evicts the coldest entry when full, and
+ * survives unrelated mutations.
+ */
+class LruCache {
+  /**
+   * @param capacity - maximum live entries; the coldest is evicted past this.
+   * @param defaultTtlMs - entry lifetime when the caller names none.
+   */
+  constructor(capacity, defaultTtlMs) {
+    this.capacity = Math.max(1, capacity);
+    this.defaultTtlMs = defaultTtlMs;
+    this.entries = new Map();
+  }
+
+  /** Read one entry, refreshing its recency; `undefined` when absent or stale. */
+  get(key) {
+    const entry = this.entries.get(key);
+    if (entry === undefined) return undefined;
+    if (entry.expires <= Date.now()) {
+      this.entries.delete(key);
+      return undefined;
+    }
+    // Re-insert to move the key to the newest end of the Map's own order.
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry.value;
+  }
+
+  /** Store one value, evicting the coldest entries past the capacity. */
+  set(key, value, ttlMs = this.defaultTtlMs) {
+    if (ttlMs <= 0) return;
+    this.entries.delete(key);
+    this.entries.set(key, { value, expires: Date.now() + ttlMs });
+    while (this.entries.size > this.capacity) {
+      const oldest = this.entries.keys().next();
+      if (oldest.done === true) break;
+      this.entries.delete(oldest.value);
+    }
+  }
+
+  /** Drop one entry. */
+  delete(key) {
+    this.entries.delete(key);
+  }
+
+  /** Drop every entry whose key starts with `prefix`. */
+  deletePrefix(prefix) {
+    for (const key of [...this.entries.keys()]) {
+      if (key.startsWith(prefix)) this.entries.delete(key);
+    }
+  }
+
+  /** Drop everything. */
+  clear() {
+    this.entries.clear();
+  }
+
+  /** Live entry count, for diagnostics and tests. */
+  get size() {
+    return this.entries.size;
+  }
+}
+
+/**
  * Git and session access behind the Remote API.
  */
 export class WorktreeService {
@@ -225,7 +307,7 @@ export class WorktreeService {
   constructor(ctx, options) {
     this.ctx = ctx;
     this.options = options;
-    this.cache = new Map();
+    this.cache = new LruCache(options.cacheCapacity, options.cacheTtlMs);
     this.pending = new Map();
     this.lifetime = new AbortController();
     this.disposed = false;
@@ -306,20 +388,38 @@ export class WorktreeService {
     return this.ctx.fs.processPath(target);
   }
 
-  /** Cache one computed value briefly; mutations clear the whole cache. */
+  /**
+   * Drop cached checkout facts after a mutation.
+   *
+   * Branch switching, worktree creation and removal only invalidate the state of
+   * one repository, but the affected keys are spread across several prefixes and
+   * freshly created checkouts have no key yet. Clearing the checkout prefixes and
+   * keeping `session-cwd:` entries — which are durable header reads, not Git
+   * output — means repeated session switches stay warm through a mutation.
+   */
+  invalidateCheckouts() {
+    for (const prefix of ['inspect:', 'worktrees:', 'dirty:', 'status:', 'heads:']) {
+      this.cache.deletePrefix(prefix);
+    }
+  }
+
+  /** Drop the durable directory fact of one session, after it moved. */
+  forgetSessionCwd(sessionId) {
+    this.cache.delete(`session-cwd:${sessionId}`);
+  }
+
+  /** Cache one computed value; mutations drop only the affected keys. */
   async cached(key, compute) {
     const ttl = this.options.cacheTtlMs;
-    const now = Date.now();
-    if (ttl > 0) {
-      const hit = this.cache.get(key);
-      if (hit !== undefined && hit.expires > now) return hit.value;
-    }
+    if (ttl <= 0) return compute();
+    const hit = this.cache.get(key);
+    if (hit !== undefined) return hit;
     const running = this.pending.get(key);
     if (running !== undefined) return running;
     const operation = (async () => compute())().finally(() => this.pending.delete(key));
     this.pending.set(key, operation);
     const value = await operation;
-    if (ttl > 0) this.cache.set(key, { value, expires: Date.now() + ttl });
+    this.cache.set(key, value, ttl);
     return value;
   }
 
@@ -336,16 +436,63 @@ export class WorktreeService {
   }
 
   /**
-   * Resolve the checkout a session operates on.
+   * Working directory of one session, whether or not its Agent is live.
+   *
+   * A session that is not open in this Host still has a durable header with the
+   * directory it last ran in, and `sessionQuery.observeSession` reads it without
+   * activating anything. The sidebar needs every row to answer, not only the row
+   * whose Agent happens to be warm, so the cold path is the common path there.
    * @param {string} sessionId - session identity from the Client.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns the directory, or `undefined` when the session cannot be read.
+   */
+  async coldCwdOf(sessionId, signal) {
+    const cacheKey = `session-cwd:${sessionId}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached !== undefined) return cached;
+    const query = this.ctx.sessionQuery;
+    if (query === undefined || typeof query.observeSession !== 'function') return undefined;
+    let observed;
+    try {
+      observed = await query.observeSession(sessionId);
+      const header = observed?.header ?? {};
+      const cwd = typeof header.cwd === 'string' && header.cwd.length > 0 ? header.cwd : undefined;
+      if (cwd !== undefined) this.cache.set(cacheKey, cwd);
+      return cwd;
+    } catch {
+      return undefined;
+    } finally {
+      // `observeSession` hands out a disposable snapshot; release it so a cold
+      // read never pins a session log open.
+      const dispose = observed?.[Symbol.dispose] ?? observed?.dispose;
+      if (typeof dispose === 'function') {
+        try {
+          dispose.call(observed);
+        } catch {
+          /* disposal is best effort */
+        }
+      }
+    }
+  }
+
+  /**
+   * Resolve the checkout a session operates on.
+   *
+   * Prefers the live Agent so an in-place branch switch is reflected at once,
+   * and falls back to the durable header so cold sessions (most sidebar rows)
+   * still resolve instead of answering `session-unavailable`.
+   * @param {string} sessionId - session identity from the Client.
+   * @param {AbortSignal} signal - operation cancellation.
    * @returns `{ agent, cwd }` or a structured failure.
    */
-  checkoutOf(sessionId) {
+  async checkoutOf(sessionId, signal) {
     const agent = this.agentOf(sessionId);
-    if (agent === undefined) {
-      return failure('session-unavailable', 'Session is not open in this Host; open it before changing branches.', { sessionId });
+    if (agent !== undefined) return { agent, cwd: this.cwdOf(agent) };
+    const cwd = await this.coldCwdOf(sessionId, signal);
+    if (cwd === undefined) {
+      return failure('session-unavailable', 'This session has no readable working directory yet; open it once and retry.', { sessionId });
     }
-    return { agent, cwd: this.cwdOf(agent) };
+    return { cwd };
   }
 
   /**
@@ -496,7 +643,7 @@ export class WorktreeService {
    */
   async status(sessionId, signal) {
     const bound = this.bind(signal);
-    const checkout = this.checkoutOf(sessionId);
+    const checkout = await this.checkoutOf(sessionId, bound);
     if (checkout.ok === false) return checkout;
     const poolPath = this.options.poolDirectory;
     let cwd = checkout.cwd;
@@ -629,7 +776,7 @@ export class WorktreeService {
     if (!isRelativeBranchName(name)) {
       return failure('invalid-name', `"${name}" is not a usable branch name.`, { hint: 'Use a name like feature/login: no leading dash, backslash, or dot segments.' });
     }
-    const checkout = this.checkoutOf(request.sessionId);
+    const checkout = await this.checkoutOf(request.sessionId, bound);
     if (checkout.ok === false) return checkout;
     const { cwd } = checkout;
     const state = await this.inspect(cwd, bound);
@@ -662,7 +809,7 @@ export class WorktreeService {
       }
       return failure('switch-failed', `Git could not create branch ${name}.`, { branch: name, detail: excerpt(stderr) });
     }
-    this.cache.clear();
+    this.invalidateCheckouts();
     return { ok: true, branch: name, mode: 'created', dirtyCount: status.dirtyCount, carried: status.dirtyCount > 0 };
   }
 
@@ -674,7 +821,7 @@ export class WorktreeService {
    */
   async switchBranch(request, signal) {
     const bound = this.bind(signal);
-    const checkout = this.checkoutOf(request.sessionId);
+    const checkout = await this.checkoutOf(request.sessionId, bound);
     if (checkout.ok === false) return checkout;
     const { cwd } = checkout;
     const state = await this.inspect(cwd, bound);
@@ -753,7 +900,7 @@ export class WorktreeService {
       }
       return failure('switch-failed', `Git could not switch to ${branch}.`, { branch, detail: excerpt(stderr) });
     }
-    this.cache.clear();
+    this.invalidateCheckouts();
     return {
       ok: true,
       branch,
@@ -782,7 +929,7 @@ export class WorktreeService {
    */
   async createWorktree(request, signal) {
     const bound = this.bind(signal);
-    const checkout = this.checkoutOf(request.sessionId);
+    const checkout = await this.checkoutOf(request.sessionId, bound);
     if (checkout.ok === false) return checkout;
     const name = request.name.trim();
     if (!isRelativeBranchName(name)) {
@@ -865,7 +1012,7 @@ export class WorktreeService {
           /* Tracking is a convenience; the checkout exists either way. */
         }
       }
-      this.cache.clear();
+      this.invalidateCheckouts();
       return {
         ok: true,
         path: destination,
@@ -925,7 +1072,7 @@ export class WorktreeService {
    */
   async enterWorktree(request, signal) {
     const bound = this.bind(signal);
-    const checkout = this.checkoutOf(request.sessionId);
+    const checkout = await this.checkoutOf(request.sessionId, bound);
     if (checkout.ok === false) return checkout;
     let directory;
     try {
@@ -939,8 +1086,16 @@ export class WorktreeService {
     } catch {
       return failure('not-a-directory', `${directory} does not exist.`, { path: directory });
     }
+    // Moving a session needs a live Agent: the directory is runtime state of a
+    // running agent, not a durable header field.
+    const live = this.agentOf(request.sessionId);
+    if (live === undefined) {
+      return failure('session-unavailable', 'Open this session before moving it into another checkout.', { sessionId: request.sessionId });
+    }
     try {
-      const cwd = await this.ctx.workingDirectory.set(checkout.agent, directory, bound);
+      const cwd = await this.ctx.workingDirectory.set(live, directory, bound);
+      // The session's directory changed, so any cached answer about it is stale.
+      this.forgetSessionCwd(request.sessionId);
       return { ok: true, cwd };
     } catch (error) {
       return failure('enter-failed', `Could not move the session into ${directory}.`, { path: directory, detail: error instanceof Error ? error.message : String(error) });
@@ -955,7 +1110,7 @@ export class WorktreeService {
    */
   async removeWorktree(request, signal) {
     const bound = this.bind(signal);
-    const checkout = this.checkoutOf(request.sessionId);
+    const checkout = await this.checkoutOf(request.sessionId, bound);
     if (checkout.ok === false) return checkout;
     const state = await this.inspect(checkout.cwd, bound);
     if (!state.isRepo) return failure('not-a-repo', 'This session directory is not a Git repository.', { cwd: checkout.cwd });
@@ -984,7 +1139,7 @@ export class WorktreeService {
       const detail = error instanceof Error ? error.message : String(error);
       return failure('remove-failed', `Could not remove ${target}.`, { path: target, detail: excerpt(detail) });
     }
-    this.cache.clear();
+    this.invalidateCheckouts();
     return { ok: true, removed: true, path: target };
   }
 }
@@ -1010,7 +1165,7 @@ function filterOverrides(drivers) {
  */
 export function apply(ctx, config) {
   const options = resolveOptions(config);
-  ctx.inject(['typert', 'subprocess', 'fs', 'workingDirectory', 'agents'], (scoped) => {
+  ctx.inject(['typert', 'subprocess', 'fs', 'workingDirectory', 'agents', 'sessionQuery'], (scoped) => {
     const service = new WorktreeService(scoped, options);
     scoped.provide(SERVICE_KEY, service);
     scoped.typert.register({
