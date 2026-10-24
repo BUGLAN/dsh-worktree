@@ -25,8 +25,13 @@ function useGitInfo(store, path) {
 }
 
 /**
- * Leading 16px cell mark: a worktree glyph for linked checkouts, a plain
- * branch glyph for the main checkout, nothing outside a repository.
+ * Leading 16px cell mark: a worktree glyph only for a *linked* checkout, a
+ * plain branch glyph for the main checkout, nothing outside a repository.
+ *
+ * The main checkout must never get the worktree glyph: it owns `.git`, so
+ * showing a "permanent worktree" mark there would claim a directory that is
+ * the repository itself. `isWorktree` comes from the Host, which decides it by
+ * comparing `git-dir` with `git-common-dir` rather than by list position.
  * @param props.sessionId - row session identity (owner props).
  * @param props.worktree - the API bundle ({ api, store }).
  * @param props.useSessions - framework hook over the sessions snapshot.
@@ -36,7 +41,7 @@ export function SessionLeadingMark({ sessionId, worktree, useSessions, t }) {
   const cwd = useSessionCwd(useSessions, sessionId);
   const info = useGitInfo(worktree.store, cwd);
   if (info === undefined || info.isRepo !== true) return null;
-  const isWorktree = info.isWorktree === true;
+  const isWorktree = info.isWorktree === true && info.worktreeName !== null && info.worktreeName !== undefined;
   const branch = (isWorktree === true ? info.worktreeBranch : info.branch) ?? info.branch ?? '';
   const title = isWorktree === true
     ? t('sidebar.worktreeTitle', { name: info.worktreeName ?? '', branch })

@@ -24,7 +24,17 @@ export function createWorktreeApi(ctx) {
   const sessions = ctx.sessions;
   const uiWorkspace = ctx.uiWorkspace;
   const call = async (method, ...args) => {
-    const result = await remoteOf()[method](...args);
+    const namespace = remoteOf();
+    if (typeof namespace[method] !== 'function') {
+      // The mounted namespace mirrors the Host the page booted against. A method
+      // the Host does not export means the Host half is older than this client
+      // half (plugin updated without restarting Harness): say so instead of
+      // surfacing a bare transport 404.
+      throw new Error(
+        `The Harness Host does not expose worktree/${method} yet. Restart DeepSeek Harness so the plugin's Host half reloads, then retry.`,
+      );
+    }
+    const result = await namespace[method](...args);
     if (!result.ok) throw new Error(result.error.message);
     return result.value;
   };

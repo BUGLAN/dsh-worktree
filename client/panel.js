@@ -567,15 +567,22 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
             className: 'dsh-wt-section',
             children: [
               jsx('div', { className: 'dsh-wt-section-title', children: t('panel.localSection') }),
-              branches.locals.map((branch) => {
+              branches.locals.map((branch, index) => {
                 const isCurrent = branch.current === true;
                 const busyRow = busy !== null && busy.kind === 'switch' && busy.branch === branch.name;
                 return jsxs('button', {
                   type: 'button',
                   className: 'dsh-wt-row',
-                  disabled: isCurrent === true,
+                  // The current branch stays focusable and readable: a real
+                  // `disabled` button drops to a dimmed label that disappears on
+                  // a light surface, and a check mark is a better "you are here"
+                  // than a greyed-out row.
+                  'aria-disabled': isCurrent === true ? 'true' : undefined,
+                  'data-current': isCurrent === true ? 'true' : undefined,
+                  style: { animationDelay: `${String(Math.min(index, 8) * 14)}ms` },
                   'data-testid': `dsh-worktree-branch-${branch.name}`,
                   onClick: () => {
+                    if (isCurrent === true) return;
                     void switchTo(branch.name);
                   },
                   children: [
@@ -584,11 +591,9 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                       className: 'dsh-wt-row-main',
                       children: [
                         jsx('span', { className: 'dsh-wt-row-title', children: jsx('span', { className: 'dsh-wt-row-name', children: branch.name }) }),
-                        branch.occupiedPath != null
-                          ? jsx('span', { className: 'dsh-wt-row-sub', children: t('row.occupied', { name: baseName(branch.occupiedPath) }) })
-                          : isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
-                            ? jsx('span', { className: 'dsh-wt-row-sub', 'data-tone': 'warn', children: dirtyLabel(t, currentDirty) })
-                            : null,
+                        isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
+                          ? jsx('span', { className: 'dsh-wt-row-sub', 'data-tone': 'warn', children: dirtyLabel(t, currentDirty) })
+                          : null,
                       ],
                     }),
                     isCurrent === true && jsx('span', { className: 'dsh-wt-row-check', children: jsx(CheckIcon, { size: 14 }) }),

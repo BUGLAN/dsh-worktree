@@ -431,7 +431,11 @@ export class WorktreeService {
       // No worktree record: trust the git-dir/commondir split from `inspect`.
       return state.linked === true ? { isWorktree: true, worktreePath: state.path, worktreeName: basename(state.path) } : { isWorktree: false };
     }
-    const isMain = samePath(owner.path, worktrees[0]?.path);
+    // `linked` from `rev-parse` is authoritative: the checkout that owns `.git`
+    // has identical git-dir and common-dir, a linked worktree does not. Path
+    // comparison cannot decide this because `--show-toplevel` resolves to each
+    // checkout's own directory, so every worktree looks like a repository root.
+    const isMain = state.linked !== true;
     return {
       isWorktree: !isMain,
       worktreePath: owner.path,
@@ -533,19 +537,28 @@ export class WorktreeService {
         const [name = '', upstream = ''] = line.split('\t');
         return { name, upstream: upstream.length === 0 ? null : upstream };
       });
-    const branches = heads.map((entry) => ({
-      name: entry.name,
-      kind: 'local',
-      current: entry.name === status.branch,
-      upstream: entry.upstream,
-      occupiedPath: worktrees.find((worktree) => worktree.branch === entry.name && !samePath(worktree.path, currentWorktreePath))?.path ?? null,
-    }));
+    // Only branches that belong to *this* checkout: a branch checked out in
+    // another worktree is that worktree's business, so it is filtered out here
+    // instead of being offered (and then refused) by the picker.
+    const branches = heads
+      .filter((entry) => !worktrees.some((worktree) => worktree.branch === entry.name && !samePath(worktree.path, currentWorktreePath)))
+      .map((entry) => ({
+        name: entry.name,
+        kind: 'local',
+        current: entry.name === status.branch,
+        upstream: entry.upstream,
+        occupiedPath: null,
+      }));
     const poolEntries = worktrees.map((entry, index) => ({
       path: entry.path,
       name: basename(entry.path),
       branch: entry.branch,
       head: entry.head,
       detached: entry.detached,
+      // `git worktree list` always prints the main checkout first, and the main
+      // checkout is the one whose `git-dir` equals `git-common-dir`. Path
+      // comparison cannot decide this: `--show-toplevel` resolves to each
+      // checkout's own directory, so every worktree looks like a root.
       isMain: index === 0,
       inPool: underPath(poolPath, entry.path),
       locked: entry.locked,

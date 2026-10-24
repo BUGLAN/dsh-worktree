@@ -232,8 +232,19 @@ try {
   check('status: pool worktree listed', listedTask !== undefined && listedTask.inPool === true && listedTask.branch === 'task-1');
   const occupiedMain = value.branches.find((entry) => entry.name === 'main');
   check('status: main not occupied for own checkout', occupiedMain?.occupiedPath == null);
+  // A branch checked out in another worktree is that worktree's branch: the
+  // picker only offers what this checkout can actually switch to.
   const taskBranch = value.branches.find((entry) => entry.name === 'task-1');
-  check('status: occupied branch annotated', taskBranch?.occupiedPath === worktreePath);
+  check('status: foreign worktree branch hidden', taskBranch === undefined);
+  check('status: only this checkout branches offered', value.branches.every((entry) => entry.kind === 'local' && entry.occupiedPath == null));
+
+  // --- worktree identity: main checkout is never a worktree --------------
+  value = await service.gitInfo([repo, worktreePath]);
+  const mainFacts = value.items?.[0] ?? value[0];
+  const linkedFacts = value.items?.[1] ?? value[1];
+  check('gitInfo: main checkout isWorktree=false', mainFacts?.isWorktree === false, JSON.stringify(mainFacts));
+  check('gitInfo: linked checkout isWorktree=true', linkedFacts?.isWorktree === true, JSON.stringify(linkedFacts));
+  check('gitInfo: main checkout has no worktree name', mainFacts?.worktreeName == null);
 
   // --- removeWorktree ------------------------------------------------------
   value = await service.removeWorktree({ sessionId: 's1', path: repo });
