@@ -25,6 +25,9 @@ export const CSS = `
 @keyframes dsh-wt-row-in{from{opacity:0;transform:translateX(-3px)}to{opacity:1;transform:none}}
 
 /* ---- composer toolbar trigger ---- */
+/* Keeps the toolbar's width stable while the first repository lookup runs, so the
+   row does not jump once the trigger is either drawn or dropped. */
+.dsh-wt-trigger-placeholder{display:inline-block;width:0;height:28px;flex:none}
 .dsh-wt-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 5px 0 7px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500;line-height:20px;cursor:pointer;max-width:190px;transition:background .12s ease,color .12s ease}
 .dsh-wt-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-primary)}
 .dsh-wt-trigger:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}

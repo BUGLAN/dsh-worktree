@@ -258,7 +258,6 @@ const en = {
   'confirm.dirtyCreate.body': "This checkout has {n} uncommitted change(s). Branch {branch} keeps them as uncommitted work.",
   'confirm.dirtyCreate.proceed': "Create anyway",
   'trigger.branch': 'Branch',
-  'trigger.noRepo': 'No repository',
   'trigger.detached': 'Detached',
   'trigger.loading': 'Reading repository…',
   'panel.searchPlaceholder': 'Search branches…',
@@ -350,7 +349,6 @@ const zh = {
   'confirm.dirtyCreate.body': "当前检出有 {n} 个未提交更改。分支 {branch} 会把这些更改作为未提交内容保留。",
   'confirm.dirtyCreate.proceed': "仍然创建",
   'trigger.branch': '分支',
-  'trigger.noRepo': '非 Git 仓库',
   'trigger.detached': '分离头指针',
   'trigger.loading': '正在读取仓库…',
   'panel.searchPlaceholder': '搜索分支…',
@@ -453,6 +451,9 @@ const CSS = `
 @keyframes dsh-wt-row-in{from{opacity:0;transform:translateX(-3px)}to{opacity:1;transform:none}}
 
 /* ---- composer toolbar trigger ---- */
+/* Keeps the toolbar's width stable while the first repository lookup runs, so the
+   row does not jump once the trigger is either drawn or dropped. */
+.dsh-wt-trigger-placeholder{display:inline-block;width:0;height:28px;flex:none}
 .dsh-wt-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 5px 0 7px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500;line-height:20px;cursor:pointer;max-width:190px;transition:background .12s ease,color .12s ease}
 .dsh-wt-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-primary)}
 .dsh-wt-trigger:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
@@ -1223,17 +1224,25 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
     });
   }, [worktree.store, sessionId]);
 
-  const variant = status?.isRepo && status.isWorktree ? 'worktree' : 'branch';
+  // Nothing to offer outside a repository, and no useful state to report: the
+  // trigger is the branch entry point, so it is hidden entirely rather than shown
+  // disabled with a "not a Git repository" label that only names its own uselessness.
+  // While the first lookup is still in flight the space is kept, so the composer
+  // toolbar does not shift when the answer arrives.
+  if (loading === true && status === undefined) {
+    return jsx('span', { className: 'dsh-wt-trigger-placeholder', 'aria-hidden': 'true' });
+  }
+  if (status?.isRepo !== true) return null;
+
+  const variant = status.isWorktree === true ? 'worktree' : 'branch';
   // A worktree reads as `<directory>/<branch>` so the trigger names both the
   // checkout and what is checked out in it.
-  const worktreeLabel = status?.isRepo === true && status.isWorktree === true
+  const worktreeLabel = status.isWorktree === true
     ? [status.worktreeName, status.branch].filter((part) => typeof part === 'string' && part.length > 0).join('/')
     : '';
-  const label = status?.isRepo === true
-    ? (status.isWorktree ? (worktreeLabel.length > 0 ? worktreeLabel : (status.branch ?? '')) : (status.branch ?? t('trigger.detached')))
-    : status?.isRepo === false && loading !== true
-      ? t('trigger.noRepo')
-      : t('trigger.loading');
+  const label = status.isWorktree === true
+    ? (worktreeLabel.length > 0 ? worktreeLabel : (status.branch ?? ''))
+    : (status.branch ?? t('trigger.detached'));
 
   return jsxs(Fragment, {
     children: [
@@ -1249,9 +1258,9 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
         onClick: () => {
           setOpen((value) => !value);
         },
-        title: status?.isRepo === true
-          ? (status.isWorktree ? t('sidebar.worktreeTitle', { name: status.worktreeName ?? '', branch: status.branch ?? '' }) : t('sidebar.branchTitle', { branch: status.branch ?? t('trigger.detached') }))
-          : label,
+        title: status.isWorktree === true
+          ? t('sidebar.worktreeTitle', { name: status.worktreeName ?? '', branch: status.branch ?? '' })
+          : t('sidebar.branchTitle', { branch: status.branch ?? t('trigger.detached') }),
         children: [
           jsx('span', { className: 'dsh-wt-trigger-icon', children: variant === 'worktree' ? jsx(WorktreeIcon, {}) : jsx(BranchIcon, {}) }),
           jsx('span', { className: 'dsh-wt-trigger-label', children: label || t('trigger.loading') }),
