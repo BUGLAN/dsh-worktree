@@ -637,10 +637,23 @@ function CheckIcon(props) {
   return jsx(Svg, { ...props, children: jsx('path', { d: 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z' }) });
 }
 
-function ChevronIcon({ open, ...props }) {
+/**
+ * Chevron whose point names a direction.
+ *
+ * The base path is Octicons `chevron-down-16`, so no rotation points down. The
+ * trigger uses `direction="up"` while its panel sits above it and `"down"` when
+ * the panel is closed or flipped below, which is the opposite of "rotate when
+ * open": the arrow shows where the panel is, not whether it exists.
+ * @param props.direction - `up` or `down`; the way the chevron points.
+ */
+function ChevronIcon({ direction = 'down', ...props }) {
   return jsx(Svg, {
     ...props,
-    style: { transform: open === true ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform .12s ease', ...(props.style ?? {}) },
+    style: {
+      transform: direction === 'up' ? 'rotate(180deg)' : 'rotate(0deg)',
+      transition: 'transform .12s ease',
+      ...(props.style ?? {}),
+    },
     children: jsx('path', { d: 'M12.78 6.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 7.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L8 9.94l3.72-3.72a.75.75 0 0 1 1.06 0Z' }),
   });
 }
@@ -1137,10 +1150,10 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
           jsx('span', { className: 'dsh-wt-trigger-label', children: label || t('trigger.loading') }),
           jsx('span', {
             className: 'dsh-wt-trigger-chevron',
-            // Collapsed points down (the panel would open below); expanded points
-            // at whichever side the panel actually took.
+            // The chevron points at the panel: up while it sits above the
+            // trigger, down while collapsed or flipped below.
             'data-open': open === true ? 'true' : undefined,
-            children: jsx(ChevronIcon, { open: open === true && placement === 'above', size: 14 }),
+            children: jsx(ChevronIcon, { direction: open === true && placement === 'above' ? 'up' : 'down', size: 14 }),
           }),
         ],
       }),

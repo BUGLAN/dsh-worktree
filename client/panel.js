@@ -193,10 +193,10 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
           jsx('span', { className: 'dsh-wt-trigger-label', children: label || t('trigger.loading') }),
           jsx('span', {
             className: 'dsh-wt-trigger-chevron',
-            // Collapsed points down (the panel would open below); expanded points
-            // at whichever side the panel actually took.
+            // The chevron points at the panel: up while it sits above the
+            // trigger, down while collapsed or flipped below.
             'data-open': open === true ? 'true' : undefined,
-            children: jsx(ChevronIcon, { open: open === true && placement === 'above', size: 14 }),
+            children: jsx(ChevronIcon, { direction: open === true && placement === 'above' ? 'up' : 'down', size: 14 }),
           }),
         ],
       }),
