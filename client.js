@@ -236,6 +236,7 @@ const en = {
   'panel.noMatches': 'No matching branch',
   'panel.poolHint': 'Pool: {path}',
   'panel.repoRoot': 'Repository: {path}',
+  'panel.sessionPending': 'Session is still starting; branch state loads in a moment.',
   'panel.notRepo': 'This session directory is not a Git repository. Open a session inside a repository to switch branches.',
   'panel.noWorktrees': 'No worktrees yet. Create a branch below to start a parallel task.',
   'status.clean': 'Working tree clean',
@@ -312,6 +313,7 @@ const zh = {
   'panel.noMatches': '没有匹配的分支',
   'panel.poolHint': '统一目录：{path}',
   'panel.repoRoot': '仓库：{path}',
+  'panel.sessionPending': '会话正在启动，稍候将自动读取分支状态。',
   'panel.notRepo': '当前会话目录不是 Git 仓库。请在仓库内打开会话后再切换分支。',
   'panel.noWorktrees': '还没有 worktree。在下方创建分支即可开始一个并行任务。',
   'status.clean': '工作区干净',
@@ -379,9 +381,15 @@ const zh = {
 //#region client/styles.js
 /**
  * Plugin-owned stylesheet. Inserted once per client run as a scoped
- * `<style data-plugin="dsh-worktree">` tag and removed with it. Only theme
- * tokens (`--dsw-alias-*`, radii, elevations) reference the host theme; every
- * class is prefixed `dsh-wt-` so nothing leaks into host components.
+ * `<style data-plugin="dsh-worktree">` tag and removed with it.
+ *
+ * Opacity policy: the panel is an opaque surface (`--dsw-alias-bg-layer-2`
+ * first, never a bare translucent overlay) so text keeps contrast over the
+ * conversation behind it. Hover/subtle fills use a stronger mix than the host's
+ * faint `interactive-bg-hover`, because a 5% black wash is invisible on the
+ * dark composer area.
+ *
+ * Density policy: 6/8px rhythm, 28px rows, no decorative gaps between sections.
  * @module dsh-worktree/client/styles
  */
 
@@ -390,111 +398,124 @@ const CSS = `
 @keyframes dsh-wt-spin{to{transform:rotate(360deg)}}
 
 /* ---- composer toolbar trigger ---- */
-.dsh-wt-trigger{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 4px 0 8px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,8px);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500;line-height:20px;cursor:pointer;max-width:180px}
-.dsh-wt-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-primary)}
+.dsh-wt-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 5px 0 7px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500;line-height:20px;cursor:pointer;max-width:190px}
+.dsh-wt-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-primary)}
 .dsh-wt-trigger:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
 .dsh-wt-trigger:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:default}
-.dsh-wt-trigger .dsh-wt-trigger-icon{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
+.dsh-wt-trigger .dsh-wt-trigger-icon{display:inline-flex;flex:none;opacity:.9}
 .dsh-wt-trigger .dsh-wt-trigger-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsh-wt-trigger .dsh-wt-trigger-chevron{display:inline-flex;flex:none;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
-.dsh-wt-trigger[data-variant="worktree"] .dsh-wt-trigger-icon{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+.dsh-wt-trigger .dsh-wt-trigger-chevron{display:inline-flex;flex:none;opacity:.65}
+.dsh-wt-trigger[data-variant="worktree"] .dsh-wt-trigger-icon{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
 @container (width<=460px){.dsh-wt-trigger .dsh-wt-trigger-label{display:none}}
 
 /* ---- anchored panel ---- */
-.dsh-wt-panel{position:fixed;z-index:1100;width:380px;max-width:calc(100vw - 24px);background:var(--dsw-specific-menu,var(--dsw-alias-bg-overlay));border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg,12px);box-shadow:var(--dsw-elevation-prominent,0 12px 32px rgba(0,0,0,.18));display:flex;flex-direction:column;max-height:min(520px,calc(100vh - 32px));overflow:hidden;color:var(--dsw-alias-label-primary);font-size:13px}
-.dsh-wt-panel-search{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
-.dsh-wt-panel-search input{flex:1;min-width:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;outline:none}
+.dsh-wt-panel{position:fixed;z-index:1100;width:360px;max-width:calc(100vw - 16px);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-overlay,Canvas));border:1px solid var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:var(--dsw-radius-lg,10px);box-shadow:0 12px 28px rgba(0,0,0,.45),0 0 0 1px rgba(0,0,0,.25);display:flex;flex-direction:column;max-height:min(460px,calc(100vh - 96px));overflow:hidden;color:var(--dsw-alias-label-primary,CanvasText);font-size:13px}
+.dsh-wt-panel-search{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));flex:none}
+.dsh-wt-panel-search input{flex:1;min-width:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;outline:none}
 .dsh-wt-panel-search input::placeholder{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
-.dsh-wt-panel-body{overflow-y:auto;overscroll-behavior:contain;padding:4px 0 6px}
-.dsh-wt-section{margin-top:6px}
-.dsh-wt-section-title{display:flex;align-items:center;gap:6px;padding:4px 12px 2px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;user-select:none}
-.dsh-wt-section-title .dsh-wt-section-extra{margin-left:auto;font-weight:400;text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
-.dsh-wt-row{display:flex;align-items:center;gap:8px;width:100%;padding:5px 12px;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;text-align:left;cursor:pointer}
-.dsh-wt-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
-.dsh-wt-row:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
-.dsh-wt-row:disabled{cursor:default;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
-.dsh-wt-row .dsh-wt-row-icon{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}
-.dsh-wt-row[data-kind="worktree"] .dsh-wt-row-icon{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
-.dsh-wt-row-main{flex:1;min-width:0;display:flex;flex-direction:column}
-.dsh-wt-row-title{display:flex;align-items:center;gap:6px;min-width:0}
-.dsh-wt-row-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-.dsh-wt-row-sub{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11.5px;line-height:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsh-wt-row-sub[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}
-.dsh-wt-row-check{display:inline-flex;flex:none;color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
-.dsh-wt-row-actions{display:inline-flex;flex:none;gap:2px;opacity:0;transition:opacity .1s}
-.dsh-wt-row:hover .dsh-wt-row-actions,.dsh-wt-row:focus-within .dsh-wt-row-actions{opacity:1}
-.dsh-wt-iconbtn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:pointer}
-.dsh-wt-iconbtn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary)}
-.dsh-wt-iconbtn[data-tone="danger"]:hover{color:var(--dsw-alias-state-error-primary)}
-.dsh-wt-badge{flex:none;display:inline-flex;align-items:center;height:16px;padding:0 6px;border-radius:8px;font-size:10.5px;font-weight:600;background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
-.dsh-wt-badge[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}
-.dsh-wt-badge[data-tone="brand"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+.dsh-wt-panel-body{overflow-y:auto;overscroll-behavior:contain;padding:2px 0 4px;min-height:0}
 
-/* current-checkout status block */
-.dsh-wt-current{display:flex;align-items:flex-start;gap:8px;padding:8px 12px;margin:6px 10px 2px;border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.03))}
-.dsh-wt-current-icon{display:inline-flex;flex:none;margin-top:1px;color:var(--dsw-alias-label-secondary)}
-.dsh-wt-current-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-.dsh-wt-current-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsh-wt-current-sub{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11.5px;line-height:16px}
-.dsh-wt-current-sub[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}
-.dsh-wt-note{padding:8px 12px;margin:6px 10px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.03));color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
-.dsh-wt-meta{padding:2px 12px 4px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* section: no extra outer gap, title sits tight on its rows */
+.dsh-wt-panel .dsh-wt-section{margin:4px 0 0}
+.dsh-wt-panel .dsh-wt-section:first-child{margin-top:0}
+.dsh-wt-panel .dsh-wt-section-title{display:flex;align-items:center;gap:5px;padding:4px 10px 3px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;user-select:none;line-height:14px}
+.dsh-wt-panel .dsh-wt-section-title .dsh-wt-section-extra{margin-left:auto;font-weight:400;text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:168px;font-size:10.5px;opacity:.85}
+
+/* rows: 28px, 4px vertical padding */
+.dsh-wt-panel .dsh-wt-row{display:flex;align-items:center;gap:7px;width:100%;padding:3px 10px;margin:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;text-align:left;cursor:pointer;border-radius:0}
+.dsh-wt-panel .dsh-wt-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07))}
+.dsh-wt-panel .dsh-wt-row:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
+.dsh-wt-panel .dsh-wt-row:disabled{cursor:default;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
+.dsh-wt-panel .dsh-wt-row .dsh-wt-row-icon{display:inline-flex;flex:none;opacity:.85}
+.dsh-wt-panel .dsh-wt-row[data-kind="worktree"] .dsh-wt-row-icon{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
+.dsh-wt-panel .dsh-wt-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:0}
+.dsh-wt-panel .dsh-wt-row-title{display:flex;align-items:center;gap:5px;min-width:0;line-height:16px}
+.dsh-wt-panel .dsh-wt-row-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.dsh-wt-panel .dsh-wt-row-sub{color:var(--dsw-alias-label-secondary);font-size:11px;line-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-wt-panel .dsh-wt-row-sub[data-tone="warn"]{color:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#b45309) 72%,var(--dsw-alias-label-primary,#0f1115))}
+.dsh-wt-panel .dsh-wt-row-check{display:inline-flex;flex:none;color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+.dsh-wt-panel .dsh-wt-row-actions{display:inline-flex;flex:none;gap:0;opacity:0;transition:opacity .1s}
+.dsh-wt-panel .dsh-wt-row:hover .dsh-wt-row-actions,.dsh-wt-panel .dsh-wt-row:focus-within .dsh-wt-row-actions{opacity:1}
+.dsh-wt-panel .dsh-wt-iconbtn{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,5px);color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:pointer}
+.dsh-wt-panel .dsh-wt-iconbtn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.1));color:var(--dsw-alias-label-primary)}
+.dsh-wt-panel .dsh-wt-iconbtn[data-tone="danger"]:hover{color:var(--dsw-alias-state-error-primary)}
+.dsh-wt-panel .dsh-wt-badge{flex:none;display:inline-flex;align-items:center;height:15px;padding:0 5px;border-radius:7px;font-size:10px;font-weight:600;line-height:15px;background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.09));color:var(--dsw-alias-label-secondary)}
+.dsh-wt-panel .dsh-wt-badge[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}
+.dsh-wt-panel .dsh-wt-badge[data-tone="brand"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+
+/* current-checkout block */
+.dsh-wt-panel .dsh-wt-current{display:flex;align-items:flex-start;gap:7px;padding:6px 9px;margin:6px 8px 2px;border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-sm,7px);background:var(--dsw-alias-bg-layer-1,color-mix(in srgb,CanvasText 5%,Canvas))}
+.dsh-wt-panel .dsh-wt-current-icon{display:inline-flex;flex:none;margin-top:1px;opacity:.9}
+.dsh-wt-panel .dsh-wt-current-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.dsh-wt-panel .dsh-wt-current-title{font-weight:600;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-wt-panel .dsh-wt-current-sub{color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:15px}
+.dsh-wt-panel .dsh-wt-current-sub[data-tone="warn"]{color:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#b45309) 72%,var(--dsw-alias-label-primary,#0f1115))}
+.dsh-wt-panel .dsh-wt-note{padding:6px 9px;margin:6px 8px;border-radius:var(--dsw-radius-sm,7px);background:var(--dsw-alias-bg-layer-1,color-mix(in srgb,CanvasText 5%,Canvas));color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px;border:1px solid var(--dsw-alias-border-l1)}
+.dsh-wt-panel .dsh-wt-meta{padding:2px 10px 3px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:10.5px;line-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* footer: create form */
-.dsh-wt-footer{border-top:1px solid var(--dsw-alias-border-l1);padding:6px 8px}
-.dsh-wt-create-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:6px 6px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,8px);color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;cursor:pointer}
-.dsh-wt-create-toggle:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
-.dsh-wt-create-form{display:flex;flex-direction:column;gap:8px;padding:8px 6px 4px}
-.dsh-wt-create-form .dsh-wt-field{display:flex;flex-direction:column;gap:4px}
-.dsh-wt-create-form label{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11.5px}
-.dsh-wt-create-form input[type=text]{height:30px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;outline:none}
-.dsh-wt-create-form input[type=text]:focus{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
-.dsh-wt-create-form select{height:30px;padding:0 6px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px;outline:none}
-.dsh-wt-checkbox{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-primary);font-size:12.5px;cursor:pointer;user-select:none}
-.dsh-wt-checkbox input{accent-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
-.dsh-wt-create-actions{display:flex;justify-content:flex-end;gap:8px}
-.dsh-wt-button{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:none;border-radius:var(--dsw-radius-sm,8px);font-size:13px;font-weight:500;cursor:pointer}
-.dsh-wt-button:disabled{cursor:default;opacity:.6}
-.dsh-wt-button[data-variant="primary"]{background:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));color:#fff}
-.dsh-wt-button[data-variant="plain"]{background:transparent;color:var(--dsw-alias-label-secondary)}
-.dsh-wt-button[data-variant="plain"]:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-primary)}
-.dsh-wt-button[data-variant="danger"]{background:transparent;color:var(--dsw-alias-state-error-primary)}
-.dsh-wt-button[data-variant="danger"]:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.dsh-wt-panel .dsh-wt-footer{border-top:1px solid var(--dsw-alias-border-l1);padding:4px;flex:none;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-overlay))}
+.dsh-wt-panel .dsh-wt-create-toggle{display:flex;align-items:center;gap:7px;width:100%;padding:5px 7px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:18px;cursor:pointer}
+.dsh-wt-panel .dsh-wt-create-toggle:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07))}
+.dsh-wt-panel .dsh-wt-create-toggle:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:default}
+.dsh-wt-panel .dsh-wt-create-form{display:flex;flex-direction:column;gap:6px;padding:6px 6px 2px}
+.dsh-wt-panel .dsh-wt-create-form .dsh-wt-field{display:flex;flex-direction:column;gap:3px}
+.dsh-wt-panel .dsh-wt-create-form label{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11px;line-height:14px}
+.dsh-wt-panel .dsh-wt-create-form input[type=text]{height:28px;padding:0 7px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,6px);background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary,CanvasText);font-size:13px;line-height:18px;outline:none}
+.dsh-wt-panel .dsh-wt-create-form input[type=text]::placeholder{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
+.dsh-wt-panel .dsh-wt-create-form input[type=text]:focus{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+.dsh-wt-panel .dsh-wt-create-form select{height:28px;padding:0 5px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,6px);background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary,CanvasText);font-size:12.5px;line-height:18px;outline:none}
+.dsh-wt-panel .dsh-wt-checkbox{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-primary);font-size:12.5px;line-height:16px;cursor:pointer;user-select:none}
+.dsh-wt-panel .dsh-wt-checkbox input{margin:0;accent-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+.dsh-wt-panel .dsh-wt-create-actions{display:flex;justify-content:flex-end;gap:6px}
+.dsh-wt-panel .dsh-wt-button{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:none;border-radius:var(--dsw-radius-sm,6px);font-size:12.5px;font-weight:500;line-height:18px;cursor:pointer}
+.dsh-wt-panel .dsh-wt-button:disabled{cursor:default;opacity:.55}
+.dsh-wt-panel .dsh-wt-button[data-variant="primary"]{background:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));color:#fff}
+.dsh-wt-panel .dsh-wt-button[data-variant="primary"]:hover:not(:disabled){filter:brightness(1.08)}
+.dsh-wt-panel .dsh-wt-button[data-variant="plain"]{background:transparent;color:var(--dsw-alias-label-secondary)}
+.dsh-wt-panel .dsh-wt-button[data-variant="plain"]:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07));color:var(--dsw-alias-label-primary)}
+.dsh-wt-panel .dsh-wt-button[data-variant="danger"]{background:transparent;color:var(--dsw-alias-state-error-primary)}
+.dsh-wt-panel .dsh-wt-button[data-variant="danger"]:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07))}
 
-/* inline confirm / error area */
-.dsh-wt-confirm{margin:6px 10px;padding:8px 10px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.03));display:flex;flex-direction:column;gap:6px}
-.dsh-wt-confirm-title{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-state-warn-primary);font-weight:600;font-size:12.5px}
-.dsh-wt-confirm-body{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
-.dsh-wt-confirm-body .dsh-wt-confirm-detail{display:block;margin-top:4px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:72px;overflow-y:auto}
-.dsh-wt-confirm-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.dsh-wt-error{margin:6px 10px;padding:8px 10px;border:1px solid var(--dsw-alias-state-error-primary);border-radius:var(--dsw-radius-sm,8px);display:flex;flex-direction:column;gap:6px}
-.dsh-wt-error-title{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-state-error-primary);font-weight:600;font-size:12.5px}
-.dsh-wt-error-body{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
-.dsh-wt-error-body .dsh-wt-confirm-detail{display:block;margin-top:4px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:72px;overflow-y:auto}
-.dsh-wt-toast{margin:6px 10px;padding:6px 10px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));color:var(--dsw-alias-label-secondary);font-size:12px;display:flex;align-items:center;gap:6px}
-.dsh-wt-toast .dsh-wt-row-check{color:var(--dsw-alias-state-success-primary)}
+/* inline confirm / error / toast */
+.dsh-wt-panel .dsh-wt-confirm{margin:6px 8px 2px;padding:6px 9px;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:var(--dsw-radius-sm,7px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-overlay));display:flex;flex-direction:column;gap:5px}
+.dsh-wt-panel .dsh-wt-confirm-title{display:flex;align-items:center;gap:5px;color:var(--dsw-alias-state-warn-primary);font-weight:600;font-size:12px;line-height:16px}
+.dsh-wt-panel .dsh-wt-confirm-body{color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px}
+.dsh-wt-panel .dsh-wt-confirm-body .dsh-wt-confirm-detail{display:block;margin-top:3px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:10.5px;white-space:pre-wrap;word-break:break-all;max-height:60px;overflow-y:auto}
+.dsh-wt-panel .dsh-wt-confirm-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.dsh-wt-panel .dsh-wt-error{margin:6px 8px 2px;padding:6px 9px;border:1px solid var(--dsw-alias-state-error-primary);border-radius:var(--dsw-radius-sm,7px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-overlay));display:flex;flex-direction:column;gap:5px}
+.dsh-wt-panel .dsh-wt-error-title{display:flex;align-items:center;gap:5px;color:var(--dsw-alias-state-error-primary);font-weight:600;font-size:12px;line-height:16px}
+.dsh-wt-panel .dsh-wt-error-body{color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px}
+.dsh-wt-panel .dsh-wt-error-body .dsh-wt-confirm-detail{display:block;margin-top:3px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:10.5px;white-space:pre-wrap;word-break:break-all;max-height:60px;overflow-y:auto}
+.dsh-wt-panel .dsh-wt-toast{margin:6px 8px 2px;padding:5px 9px;border-radius:var(--dsw-radius-sm,7px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-overlay));border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px;display:flex;align-items:center;gap:5px}
+.dsh-wt-panel .dsh-wt-toast .dsh-wt-row-check{color:var(--dsw-alias-state-success-primary)}
 
 /* ---- session header chip ---- */
-.dsh-wt-chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;max-width:260px;white-space:nowrap;overflow:hidden}
-.dsh-wt-chip .dsh-wt-chip-icon{display:inline-flex;flex:none}
+.dsh-wt-chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:11px;color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px;max-width:240px;white-space:nowrap;overflow:hidden;background:var(--dsw-alias-bg-layer-1,transparent)}
+.dsh-wt-chip .dsh-wt-chip-icon{display:inline-flex;flex:none;opacity:.85}
 .dsh-wt-chip[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));border-color:var(--dsw-alias-border-l2)}
+.dsh-wt-chip[data-variant="worktree"] .dsh-wt-chip-icon{opacity:1}
 .dsh-wt-chip .dsh-wt-chip-label{overflow:hidden;text-overflow:ellipsis}
 
 /* ---- sidebar decorations ---- */
 .dsh-wt-leading{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
 .dsh-wt-leading[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
-.dsh-wt-hover{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
-.dsh-wt-hover .dsh-wt-hover-icon{display:inline-flex;flex:none}
-.dsh-wt-hover[data-variant="worktree"] .dsh-wt-hover-icon{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+.dsh-wt-hover{display:flex;align-items:center;gap:5px;color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px}
+.dsh-wt-hover .dsh-wt-hover-icon{display:inline-flex;flex:none;opacity:.85}
+.dsh-wt-hover[data-variant="worktree"] .dsh-wt-hover-icon{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
 .dsh-wt-hover .dsh-wt-hover-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsh-wt-hover .dsh-wt-hover-dirty{flex:none;color:var(--dsw-alias-state-warn-primary);font-size:11px}
+.dsh-wt-hover .dsh-wt-hover-dirty{flex:none;color:var(--dsw-alias-state-warn-primary);font-size:10.5px}
 `;
 //#endregion
 
 //#region client/icons.js
 /**
- * Inline SVG icons for the worktree UI. All icons inherit `currentColor` and
- * default to 16px so they sit inside the composer toolbar and sidebar cells.
+ * Inline SVG icons for the worktree UI.
+ *
+ * Branch geometry is the official GitHub Octicons `git-branch` glyph (the same
+ * shape Codex and VS Code render for a Git branch): filled 16x16 path, no
+ * invented strokes. Worktree and remote-tracking variants reuse that geometry
+ * with one distinguishing mark so all three read as members of one family.
  * @module dsh-worktree/client/icons
  */
 
@@ -504,82 +525,70 @@ function Svg({ size = 16, children, ...rest }) {
     width: size,
     height: size,
     viewBox: '0 0 16 16',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.5,
-    strokeLinecap: 'round',
-    strokeLinejoin: 'round',
+    fill: 'currentColor',
     'aria-hidden': true,
     ...rest,
     children,
   });
 }
 
-/** One branch leaving the trunk: the plain-branch mark. */
+/** Octicons `git-branch` (16px): trunk with a fork into the branch head. */
+const GIT_BRANCH_PATH = 'M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z';
+
+/** The Git branch mark every branch-shaped row uses. */
 function BranchIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', {
-      d: 'M4.5 4.2v7.6M4.5 6.2c0-1.2 1-2.2 2.2-2.2h1.1c1.5 0 2.7 1.2 2.7 2.7v0c0 1.5-1.2 2.7-2.7 2.7H7.6',
-    }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: GIT_BRANCH_PATH }) });
 }
 
-/** A branch that owns its own checkout: the worktree mark. */
+/** A linked worktree: the branch mark plus its own checkout tile. */
 function WorktreeIcon(props) {
   return jsx(Svg, {
     ...props,
-    children: jsx('path', {
-      d: 'M3.5 3.8v8.4M3.5 5.4c0-.9.7-1.6 1.6-1.6h1.4c1.4 0 2.5 1.1 2.5 2.5v3.9c0 .9.7 1.6 1.6 1.6h.4',
-    }),
+    children: [
+      jsx('path', { d: GIT_BRANCH_PATH, transform: 'translate(-1.5 0) scale(0.86) translate(1.4 1.1)' }, 'branch'),
+      jsx('rect', { x: 11.4, y: 10.6, width: 3.4, height: 3.4, rx: 0.7 }, 'tile'),
+    ],
   });
 }
 
-/** Remote-tracking mark. */
+/** A remote-tracking branch: the branch mark with a dotted trunk. */
 function RemoteBranchIcon(props) {
   return jsx(Svg, {
     ...props,
-    children: jsx('path', {
-      d: 'M4.5 4.2v7.6M4.5 6.2c0-1.2 1-2.2 2.2-2.2h1.1c1.5 0 2.7 1.2 2.7 2.7v0c0 1.5-1.2 2.7-2.7 2.7H7.6M2.2 11.8h1.2M12.2 11.8h1.2',
-    }),
+    children: [
+      jsx('path', { d: GIT_BRANCH_PATH, opacity: 0.55 }, 'branch'),
+      jsx('rect', { x: 3.1, y: 5.6, width: 1.5, height: 1.2, rx: 0.3 }, 'dash-a'),
+      jsx('rect', { x: 3.1, y: 7.9, width: 1.5, height: 1.2, rx: 0.3 }, 'dash-b'),
+    ],
   });
 }
 
 function CheckIcon(props) {
-  return jsx(Svg, { ...props, strokeWidth: 1.8, children: jsx('path', { d: 'M3 8.5l3 3 7-7' }) });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z' }) });
 }
 
 function ChevronIcon({ open, ...props }) {
   return jsx(Svg, {
     ...props,
     style: { transform: open === true ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform .12s ease', ...(props.style ?? {}) },
-    children: jsx('path', { d: 'M3 6.2l5 4.5 5-4.5' }),
+    children: jsx('path', { d: 'M12.78 6.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 7.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L8 9.94l3.72-3.72a.75.75 0 0 1 1.06 0Z' }),
   });
 }
 
 function PlusIcon(props) {
-  return jsx(Svg, { ...props, children: jsx('path', { d: 'M8 3.5v9M3.5 8h9' }) });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M7.75 2.5a.75.75 0 0 1 .75.75v4h4a.75.75 0 0 1 0 1.5h-4v4a.75.75 0 0 1-1.5 0v-4h-4a.75.75 0 0 1 0-1.5h4v-4a.75.75 0 0 1 .75-.75Z' }) });
 }
 
 function WarningIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', { d: 'M8 2.8l5.4 9.4H2.6L8 2.8zM8 6.6v3M8 11.4v.2' }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM8 11a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z' }) });
 }
 
 function TrashIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', { d: 'M3 4.6h10M6.4 4.6V3.4h3.2v1.2M4.2 4.6l.6 8h6.4l.6-8M6.6 7v3.4M9.4 7v3.4' }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25Z' }) });
 }
 
 function SearchIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', { d: 'M7 11.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM10.4 10.4L13.5 13.5' }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z' }) });
 }
 
 function SpinnerIcon({ size = 14 }) {
@@ -591,12 +600,9 @@ function SpinnerIcon({ size = 14 }) {
   });
 }
 
-/** Directory/folder mark for the pool section headers. */
+/** Directory mark for the pool section header (Octicons `file-directory`). */
 function FolderIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', { d: 'M2.2 12.6V4.4h4l1.4 1.6h6.2v6.6H2.2z' }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1Z' }) });
 }
 //#endregion
 
@@ -810,7 +816,15 @@ class GitInfoStore {
 
 
 
-/** Place the panel against its anchor, flipping when the viewport lacks room. */
+/**
+ * Place the panel against its anchor and keep it inside the viewport.
+ *
+ * The panel changes height while it is open (status load, create-form expand,
+ * confirm blocks), so a one-shot placement leaves it overflowing the window top
+ * or bottom and painting over the conversation. A ResizeObserver re-runs the
+ * same placement whenever the panel's own box changes, and the final clamp keeps
+ * both edges on screen.
+ */
 function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
   useEffect(() => {
     if (!open) return;
@@ -823,10 +837,14 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
       const a = anchor.getBoundingClientRect();
       const width = panel.offsetWidth;
       const height = panel.offsetHeight;
-      let top = a.top - height - gap;
-      if (top < 8) top = a.bottom + gap;
+      const margin = 8;
+      const roomAbove = a.top - gap - margin;
+      const roomBelow = window.innerHeight - a.bottom - gap - margin;
+      // Prefer above the composer; flip below when the panel no longer fits.
+      let top = roomAbove >= height ? a.top - height - gap : (roomBelow >= height ? a.bottom + gap : Math.max(margin, window.innerHeight - height - margin));
+      top = Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin));
       let left = a.right - width;
-      left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - width - 8));
+      left = Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin));
       panel.style.top = `${Math.round(top)}px`;
       panel.style.left = `${Math.round(left)}px`;
       if (settled === false && height > 0) {
@@ -838,10 +856,15 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
     if (panel !== null) panel.style.visibility = 'hidden';
     update();
     raf = requestAnimationFrame(update);
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => {
+      update();
+    });
+    if (panel !== null) observer?.observe(panel);
     window.addEventListener('resize', update);
     document.addEventListener('scroll', update, true);
     return () => {
       cancelAnimationFrame(raf);
+      observer?.disconnect();
       window.removeEventListener('resize', update);
       document.removeEventListener('scroll', update, true);
     };
@@ -902,19 +925,32 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
     : undefined;
   const [status, setStatus] = useState(undefined);
   const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(false);
   const refresh = useCallback(async () => {
     if (sessionId === undefined) return;
     setLoading(true);
     try {
       const value = await worktree.api.status(sessionId);
       if (value.ok === false && value.code === 'session-unavailable') {
-        // The session's agent is still starting; retry once shortly.
-        await new Promise((resolve) => {
-          setTimeout(resolve, 800);
-        });
-        const retry = await worktree.api.status(sessionId);
-        setStatus(retry.ok === true ? retry : undefined);
+        // The session's agent is still starting: mark it pending (not "no repo")
+        // and retry a few times before giving up.
+        setPending(true);
+        setStatus(undefined);
+        for (const delay of [400, 800, 1600]) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, delay);
+          });
+          const retry = await worktree.api.status(sessionId);
+          if (retry.ok === true) {
+            setPending(false);
+            setStatus(retry);
+            return;
+          }
+        }
+        setPending(false);
+        setStatus(undefined);
       } else {
+        setPending(false);
         setStatus(value);
       }
     } catch {
@@ -930,9 +966,9 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const variant = status?.isRepo && status.isWorktree ? 'worktree' : 'branch';
   const label = status?.isRepo === true
     ? (status.isWorktree ? (status.worktreeName ?? status.branch ?? '') : (status.branch ?? t('trigger.detached')))
-    : loading === true
-      ? t('trigger.loading')
-      : (status === undefined ? t('trigger.loading') : t('trigger.noRepo'));
+    : status?.isRepo === false && loading !== true
+      ? t('trigger.noRepo')
+      : t('trigger.loading');
 
   return jsxs(Fragment, {
     children: [
@@ -960,6 +996,7 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
       open === true && createPortal(
         jsx(BranchPanel, {
           panelRef,
+          themeRef: anchorRef,
           sessionId,
           status,
           loading,
@@ -979,14 +1016,65 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
 /**
  * The panel body: search, current status, worktrees, branches, create form.
  */
-function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t, refresh, onClose }) {
+function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api, store, t, refresh, onClose }) {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [themeVars, setThemeVars] = useState(undefined);
   const searchRef = useRef(null);
+  const bodyRef = useRef(null);
+  // The portal lives on document.body, outside the shell's theme scope, so the
+  // host `--dsw-alias-*` variables would be unresolved here and every surface
+  // would fall back to a hard-coded colour. Mirror the resolved values from the
+  // composer anchor (which does sit inside the themed subtree) onto the panel.
+  useEffect(() => {
+    const anchor = themeRef?.current;
+    if (anchor === null || anchor === undefined) return;
+    const source = getComputedStyle(anchor);
+    const names = [
+      '--dsw-alias-bg-base',
+      '--dsw-alias-bg-layer-1',
+      '--dsw-alias-bg-layer-2',
+      '--dsw-alias-bg-overlay',
+      '--dsw-alias-border-l1',
+      '--dsw-alias-border-l2',
+      '--dsw-alias-label-primary',
+      '--dsw-alias-label-secondary',
+      '--dsw-alias-label-dimmed',
+      '--dsw-alias-interactive-bg-hover',
+      '--dsw-alias-state-business-primary',
+      '--dsw-alias-brand-primary',
+      '--dsw-alias-state-warn-primary',
+      '--dsw-alias-state-error-primary',
+      '--dsw-alias-state-success-primary',
+      '--dsw-radius-sm',
+      '--dsw-radius-lg',
+      '--dsw-specific-menu',
+    ];
+    const resolved = {};
+    for (const name of names) {
+      const value = source.getPropertyValue(name).trim();
+      if (value.length > 0) resolved[name] = value;
+    }
+    const update = () => {
+      const next = {};
+      const live = getComputedStyle(anchor);
+      for (const name of names) {
+        const value = live.getPropertyValue(name).trim();
+        if (value.length > 0) next[name] = value;
+      }
+      setThemeVars(next);
+    };
+    setThemeVars(resolved);
+    const observer = typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(update);
+    observer?.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] });
+    return () => {
+      observer?.disconnect();
+    };
+  }, [themeRef]);
   useEffect(() => {
     searchRef.current?.focus({ preventScroll: true });
   }, []);
@@ -994,6 +1082,19 @@ function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t,
     setConfirm(null);
     setError(null);
   }, [sessionId, cwd]);
+  // Expanding the create form (or a confirm block) grows content below the fold;
+  // scroll it into view so the form is never clipped under the branch list.
+  useEffect(() => {
+    if (creating !== true) return;
+    const body = bodyRef.current;
+    if (body === null) return;
+    const frame = requestAnimationFrame(() => {
+      body.scrollTop = body.scrollHeight;
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [creating]);
 
   const afterMutation = useCallback((message) => {
     store.invalidate();
@@ -1138,6 +1239,7 @@ function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t,
     role: 'dialog',
     'aria-label': t('panel.currentSection'),
     'data-testid': 'dsh-worktree-panel',
+    style: themeVars,
     children: [
       jsxs('div', {
         className: 'dsh-wt-panel-search',
@@ -1157,11 +1259,15 @@ function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t,
         ],
       }),
       jsxs('div', {
+        ref: bodyRef,
         className: 'dsh-wt-panel-body',
         children: [
-          status !== undefined && status.isRepo !== true
-            ? jsx('div', { className: 'dsh-wt-note', children: t('panel.notRepo') })
-            : status?.isRepo === true && jsxs('div', {
+          status?.isRepo !== true && loading !== true && jsx('div', {
+            className: 'dsh-wt-note',
+            'data-testid': 'dsh-worktree-not-repo',
+            children: pending === true ? t('panel.sessionPending') : t('panel.notRepo'),
+          }),
+          status?.isRepo === true && jsxs('div', {
                 className: 'dsh-wt-current',
                 'data-testid': 'dsh-worktree-current',
                 children: [
@@ -1402,12 +1508,16 @@ function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
   const [startPoint, setStartPoint] = useState('');
   const [openSession, setOpenSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const nameRef = useRef(null);
   useEffect(() => {
     if (creating !== null && typeof creating === 'object' && creating.name !== undefined) {
       setName(creating.name);
       setCreating(false);
     }
   }, [creating, setCreating]);
+  useEffect(() => {
+    if (creating === true) nameRef.current?.focus({ preventScroll: true });
+  }, [creating]);
   const options = useMemo(() => {
     const locals = (status?.branches ?? []).filter((branch) => branch.kind === 'local').map((branch) => branch.name);
     const remotes = (status?.branches ?? []).filter((branch) => branch.kind === 'remote' && branch.hasLocal !== true).map((branch) => branch.name);
@@ -1450,6 +1560,7 @@ function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
             children: [
               jsx('label', { htmlFor: 'dsh-wt-create-name', children: t('create.title') }),
               jsx('input', {
+                ref: nameRef,
                 id: 'dsh-wt-create-name',
                 type: 'text',
                 value: name,

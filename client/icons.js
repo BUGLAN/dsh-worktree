@@ -1,6 +1,10 @@
 /**
- * Inline SVG icons for the worktree UI. All icons inherit `currentColor` and
- * default to 16px so they sit inside the composer toolbar and sidebar cells.
+ * Inline SVG icons for the worktree UI.
+ *
+ * Branch geometry is the official GitHub Octicons `git-branch` glyph (the same
+ * shape Codex and VS Code render for a Git branch): filled 16x16 path, no
+ * invented strokes. Worktree and remote-tracking variants reuse that geometry
+ * with one distinguishing mark so all three read as members of one family.
  * @module dsh-worktree/client/icons
  */
 import { jsx } from 'react/jsx-runtime';
@@ -10,82 +14,70 @@ function Svg({ size = 16, children, ...rest }) {
     width: size,
     height: size,
     viewBox: '0 0 16 16',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.5,
-    strokeLinecap: 'round',
-    strokeLinejoin: 'round',
+    fill: 'currentColor',
     'aria-hidden': true,
     ...rest,
     children,
   });
 }
 
-/** One branch leaving the trunk: the plain-branch mark. */
+/** Octicons `git-branch` (16px): trunk with a fork into the branch head. */
+const GIT_BRANCH_PATH = 'M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z';
+
+/** The Git branch mark every branch-shaped row uses. */
 export function BranchIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', {
-      d: 'M4.5 4.2v7.6M4.5 6.2c0-1.2 1-2.2 2.2-2.2h1.1c1.5 0 2.7 1.2 2.7 2.7v0c0 1.5-1.2 2.7-2.7 2.7H7.6',
-    }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: GIT_BRANCH_PATH }) });
 }
 
-/** A branch that owns its own checkout: the worktree mark. */
+/** A linked worktree: the branch mark plus its own checkout tile. */
 export function WorktreeIcon(props) {
   return jsx(Svg, {
     ...props,
-    children: jsx('path', {
-      d: 'M3.5 3.8v8.4M3.5 5.4c0-.9.7-1.6 1.6-1.6h1.4c1.4 0 2.5 1.1 2.5 2.5v3.9c0 .9.7 1.6 1.6 1.6h.4',
-    }),
+    children: [
+      jsx('path', { d: GIT_BRANCH_PATH, transform: 'translate(-1.5 0) scale(0.86) translate(1.4 1.1)' }, 'branch'),
+      jsx('rect', { x: 11.4, y: 10.6, width: 3.4, height: 3.4, rx: 0.7 }, 'tile'),
+    ],
   });
 }
 
-/** Remote-tracking mark. */
+/** A remote-tracking branch: the branch mark with a dotted trunk. */
 export function RemoteBranchIcon(props) {
   return jsx(Svg, {
     ...props,
-    children: jsx('path', {
-      d: 'M4.5 4.2v7.6M4.5 6.2c0-1.2 1-2.2 2.2-2.2h1.1c1.5 0 2.7 1.2 2.7 2.7v0c0 1.5-1.2 2.7-2.7 2.7H7.6M2.2 11.8h1.2M12.2 11.8h1.2',
-    }),
+    children: [
+      jsx('path', { d: GIT_BRANCH_PATH, opacity: 0.55 }, 'branch'),
+      jsx('rect', { x: 3.1, y: 5.6, width: 1.5, height: 1.2, rx: 0.3 }, 'dash-a'),
+      jsx('rect', { x: 3.1, y: 7.9, width: 1.5, height: 1.2, rx: 0.3 }, 'dash-b'),
+    ],
   });
 }
 
 export function CheckIcon(props) {
-  return jsx(Svg, { ...props, strokeWidth: 1.8, children: jsx('path', { d: 'M3 8.5l3 3 7-7' }) });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z' }) });
 }
 
 export function ChevronIcon({ open, ...props }) {
   return jsx(Svg, {
     ...props,
     style: { transform: open === true ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform .12s ease', ...(props.style ?? {}) },
-    children: jsx('path', { d: 'M3 6.2l5 4.5 5-4.5' }),
+    children: jsx('path', { d: 'M12.78 6.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 7.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L8 9.94l3.72-3.72a.75.75 0 0 1 1.06 0Z' }),
   });
 }
 
 export function PlusIcon(props) {
-  return jsx(Svg, { ...props, children: jsx('path', { d: 'M8 3.5v9M3.5 8h9' }) });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M7.75 2.5a.75.75 0 0 1 .75.75v4h4a.75.75 0 0 1 0 1.5h-4v4a.75.75 0 0 1-1.5 0v-4h-4a.75.75 0 0 1 0-1.5h4v-4a.75.75 0 0 1 .75-.75Z' }) });
 }
 
 export function WarningIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', { d: 'M8 2.8l5.4 9.4H2.6L8 2.8zM8 6.6v3M8 11.4v.2' }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM8 11a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z' }) });
 }
 
 export function TrashIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', { d: 'M3 4.6h10M6.4 4.6V3.4h3.2v1.2M4.2 4.6l.6 8h6.4l.6-8M6.6 7v3.4M9.4 7v3.4' }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25Z' }) });
 }
 
 export function SearchIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', { d: 'M7 11.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM10.4 10.4L13.5 13.5' }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z' }) });
 }
 
 export function SpinnerIcon({ size = 14 }) {
@@ -97,10 +89,7 @@ export function SpinnerIcon({ size = 14 }) {
   });
 }
 
-/** Directory/folder mark for the pool section headers. */
+/** Directory mark for the pool section header (Octicons `file-directory`). */
 export function FolderIcon(props) {
-  return jsx(Svg, {
-    ...props,
-    children: jsx('path', { d: 'M2.2 12.6V4.4h4l1.4 1.6h6.2v6.6H2.2z' }),
-  });
+  return jsx(Svg, { ...props, children: jsx('path', { d: 'M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1Z' }) });
 }

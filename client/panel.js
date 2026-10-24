@@ -9,7 +9,15 @@ import { createPortal } from 'react-dom';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
 import { BranchIcon, CheckIcon, ChevronIcon, FolderIcon, PlusIcon, RemoteBranchIcon, SearchIcon, SpinnerIcon, TrashIcon, WarningIcon, WorktreeIcon } from './icons.js';
 
-/** Place the panel against its anchor, flipping when the viewport lacks room. */
+/**
+ * Place the panel against its anchor and keep it inside the viewport.
+ *
+ * The panel changes height while it is open (status load, create-form expand,
+ * confirm blocks), so a one-shot placement leaves it overflowing the window top
+ * or bottom and painting over the conversation. A ResizeObserver re-runs the
+ * same placement whenever the panel's own box changes, and the final clamp keeps
+ * both edges on screen.
+ */
 function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
   useEffect(() => {
     if (!open) return;
@@ -22,10 +30,14 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
       const a = anchor.getBoundingClientRect();
       const width = panel.offsetWidth;
       const height = panel.offsetHeight;
-      let top = a.top - height - gap;
-      if (top < 8) top = a.bottom + gap;
+      const margin = 8;
+      const roomAbove = a.top - gap - margin;
+      const roomBelow = window.innerHeight - a.bottom - gap - margin;
+      // Prefer above the composer; flip below when the panel no longer fits.
+      let top = roomAbove >= height ? a.top - height - gap : (roomBelow >= height ? a.bottom + gap : Math.max(margin, window.innerHeight - height - margin));
+      top = Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin));
       let left = a.right - width;
-      left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - width - 8));
+      left = Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin));
       panel.style.top = `${Math.round(top)}px`;
       panel.style.left = `${Math.round(left)}px`;
       if (settled === false && height > 0) {
@@ -37,10 +49,15 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6) {
     if (panel !== null) panel.style.visibility = 'hidden';
     update();
     raf = requestAnimationFrame(update);
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => {
+      update();
+    });
+    if (panel !== null) observer?.observe(panel);
     window.addEventListener('resize', update);
     document.addEventListener('scroll', update, true);
     return () => {
       cancelAnimationFrame(raf);
+      observer?.disconnect();
       window.removeEventListener('resize', update);
       document.removeEventListener('scroll', update, true);
     };
@@ -101,19 +118,32 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
     : undefined;
   const [status, setStatus] = useState(undefined);
   const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(false);
   const refresh = useCallback(async () => {
     if (sessionId === undefined) return;
     setLoading(true);
     try {
       const value = await worktree.api.status(sessionId);
       if (value.ok === false && value.code === 'session-unavailable') {
-        // The session's agent is still starting; retry once shortly.
-        await new Promise((resolve) => {
-          setTimeout(resolve, 800);
-        });
-        const retry = await worktree.api.status(sessionId);
-        setStatus(retry.ok === true ? retry : undefined);
+        // The session's agent is still starting: mark it pending (not "no repo")
+        // and retry a few times before giving up.
+        setPending(true);
+        setStatus(undefined);
+        for (const delay of [400, 800, 1600]) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, delay);
+          });
+          const retry = await worktree.api.status(sessionId);
+          if (retry.ok === true) {
+            setPending(false);
+            setStatus(retry);
+            return;
+          }
+        }
+        setPending(false);
+        setStatus(undefined);
       } else {
+        setPending(false);
         setStatus(value);
       }
     } catch {
@@ -129,9 +159,9 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const variant = status?.isRepo && status.isWorktree ? 'worktree' : 'branch';
   const label = status?.isRepo === true
     ? (status.isWorktree ? (status.worktreeName ?? status.branch ?? '') : (status.branch ?? t('trigger.detached')))
-    : loading === true
-      ? t('trigger.loading')
-      : (status === undefined ? t('trigger.loading') : t('trigger.noRepo'));
+    : status?.isRepo === false && loading !== true
+      ? t('trigger.noRepo')
+      : t('trigger.loading');
 
   return jsxs(Fragment, {
     children: [
@@ -159,6 +189,7 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
       open === true && createPortal(
         jsx(BranchPanel, {
           panelRef,
+          themeRef: anchorRef,
           sessionId,
           status,
           loading,
@@ -178,14 +209,65 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
 /**
  * The panel body: search, current status, worktrees, branches, create form.
  */
-function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t, refresh, onClose }) {
+function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api, store, t, refresh, onClose }) {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [themeVars, setThemeVars] = useState(undefined);
   const searchRef = useRef(null);
+  const bodyRef = useRef(null);
+  // The portal lives on document.body, outside the shell's theme scope, so the
+  // host `--dsw-alias-*` variables would be unresolved here and every surface
+  // would fall back to a hard-coded colour. Mirror the resolved values from the
+  // composer anchor (which does sit inside the themed subtree) onto the panel.
+  useEffect(() => {
+    const anchor = themeRef?.current;
+    if (anchor === null || anchor === undefined) return;
+    const source = getComputedStyle(anchor);
+    const names = [
+      '--dsw-alias-bg-base',
+      '--dsw-alias-bg-layer-1',
+      '--dsw-alias-bg-layer-2',
+      '--dsw-alias-bg-overlay',
+      '--dsw-alias-border-l1',
+      '--dsw-alias-border-l2',
+      '--dsw-alias-label-primary',
+      '--dsw-alias-label-secondary',
+      '--dsw-alias-label-dimmed',
+      '--dsw-alias-interactive-bg-hover',
+      '--dsw-alias-state-business-primary',
+      '--dsw-alias-brand-primary',
+      '--dsw-alias-state-warn-primary',
+      '--dsw-alias-state-error-primary',
+      '--dsw-alias-state-success-primary',
+      '--dsw-radius-sm',
+      '--dsw-radius-lg',
+      '--dsw-specific-menu',
+    ];
+    const resolved = {};
+    for (const name of names) {
+      const value = source.getPropertyValue(name).trim();
+      if (value.length > 0) resolved[name] = value;
+    }
+    const update = () => {
+      const next = {};
+      const live = getComputedStyle(anchor);
+      for (const name of names) {
+        const value = live.getPropertyValue(name).trim();
+        if (value.length > 0) next[name] = value;
+      }
+      setThemeVars(next);
+    };
+    setThemeVars(resolved);
+    const observer = typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(update);
+    observer?.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] });
+    return () => {
+      observer?.disconnect();
+    };
+  }, [themeRef]);
   useEffect(() => {
     searchRef.current?.focus({ preventScroll: true });
   }, []);
@@ -193,6 +275,19 @@ function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t,
     setConfirm(null);
     setError(null);
   }, [sessionId, cwd]);
+  // Expanding the create form (or a confirm block) grows content below the fold;
+  // scroll it into view so the form is never clipped under the branch list.
+  useEffect(() => {
+    if (creating !== true) return;
+    const body = bodyRef.current;
+    if (body === null) return;
+    const frame = requestAnimationFrame(() => {
+      body.scrollTop = body.scrollHeight;
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [creating]);
 
   const afterMutation = useCallback((message) => {
     store.invalidate();
@@ -337,6 +432,7 @@ function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t,
     role: 'dialog',
     'aria-label': t('panel.currentSection'),
     'data-testid': 'dsh-worktree-panel',
+    style: themeVars,
     children: [
       jsxs('div', {
         className: 'dsh-wt-panel-search',
@@ -356,11 +452,15 @@ function BranchPanel({ panelRef, sessionId, status, loading, cwd, api, store, t,
         ],
       }),
       jsxs('div', {
+        ref: bodyRef,
         className: 'dsh-wt-panel-body',
         children: [
-          status !== undefined && status.isRepo !== true
-            ? jsx('div', { className: 'dsh-wt-note', children: t('panel.notRepo') })
-            : status?.isRepo === true && jsxs('div', {
+          status?.isRepo !== true && loading !== true && jsx('div', {
+            className: 'dsh-wt-note',
+            'data-testid': 'dsh-worktree-not-repo',
+            children: pending === true ? t('panel.sessionPending') : t('panel.notRepo'),
+          }),
+          status?.isRepo === true && jsxs('div', {
                 className: 'dsh-wt-current',
                 'data-testid': 'dsh-worktree-current',
                 children: [
@@ -601,12 +701,16 @@ function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
   const [startPoint, setStartPoint] = useState('');
   const [openSession, setOpenSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const nameRef = useRef(null);
   useEffect(() => {
     if (creating !== null && typeof creating === 'object' && creating.name !== undefined) {
       setName(creating.name);
       setCreating(false);
     }
   }, [creating, setCreating]);
+  useEffect(() => {
+    if (creating === true) nameRef.current?.focus({ preventScroll: true });
+  }, [creating]);
   const options = useMemo(() => {
     const locals = (status?.branches ?? []).filter((branch) => branch.kind === 'local').map((branch) => branch.name);
     const remotes = (status?.branches ?? []).filter((branch) => branch.kind === 'remote' && branch.hasLocal !== true).map((branch) => branch.name);
@@ -649,6 +753,7 @@ function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
             children: [
               jsx('label', { htmlFor: 'dsh-wt-create-name', children: t('create.title') }),
               jsx('input', {
+                ref: nameRef,
                 id: 'dsh-wt-create-name',
                 type: 'text',
                 value: name,
