@@ -578,6 +578,61 @@ export class WorktreeService {
   }
 
   /**
+   * Create one branch and check it out **in this checkout** — no worktree.
+   *
+   * The atomic sibling of {@link createWorktree}: this is the "just a branch"
+   * operation, so it never touches the pool and never changes the session's
+   * working directory. It still honours the same guards: an existing branch, a
+   * branch checked out elsewhere, and a dirty tree all return a structured
+   * state instead of a half-applied checkout.
+   * @param {object} request - session, new branch name, start point, dirty consent.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns the checked-out branch, or a structured state for the user.
+   */
+  async createBranch(request, signal) {
+    const bound = this.bind(signal);
+    const name = String(request.name ?? '').trim();
+    if (!isRelativeBranchName(name)) {
+      return failure('invalid-name', `"${name}" is not a usable branch name.`, { hint: 'Use a name like feature/login: no leading dash, backslash, or dot segments.' });
+    }
+    const checkout = this.checkoutOf(request.sessionId);
+    if (checkout.ok === false) return checkout;
+    const { cwd } = checkout;
+    const state = await this.inspect(cwd, bound);
+    if (!state.isRepo) return failure('not-a-repo', 'This session directory is not a Git repository.', { cwd });
+    const exists = await this.git(state.repositoryRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${name}`], { signal: bound, allowedExitCodes: [0, 1] });
+    if (exists.exitCode === 0) return failure('branch-exists', `Branch ${name} already exists.`, { branch: name, hint: 'Pick another name, or switch to the existing branch from the list.' });
+    const worktrees = await this.worktreeList(state.repositoryRoot, bound);
+    const occupied = worktrees.find((worktree) => worktree.branch === name);
+    if (occupied !== undefined) {
+      return failure('branch-occupied', `Branch ${name} is already checked out in another worktree.`, { branch: name, occupiedPath: occupied.path, hint: 'Open that worktree, or pick another name.' });
+    }
+    const statusResult = await this.git(cwd, ['status', '--porcelain=v1', '--branch', '--untracked-files=normal'], { signal: bound });
+    const status = parseStatus(statusResult.stdout);
+    if (status.dirtyCount > 0 && request.allowDirty !== true) {
+      return failure('dirty-tree', `The working tree has ${String(status.dirtyCount)} uncommitted change(s).`, {
+        branch: name,
+        dirtyCount: status.dirtyCount,
+        hint: 'Creating the branch carries these changes onto it; commit or stash first to start clean.',
+      });
+    }
+    const startPoint = request.startPoint === undefined || request.startPoint.length === 0 ? 'HEAD' : request.startPoint;
+    try {
+      await this.git(cwd, ['switch', '-c', name, '--', startPoint], { signal: bound });
+    } catch (error) {
+      if (!(error instanceof GitCommandError)) throw error;
+      const stderr = error.stderr;
+      if (/already exists/i.test(stderr)) return failure('branch-exists', `Branch ${name} already exists.`, { branch: name });
+      if (/would be overwritten|local changes/i.test(stderr)) {
+        return failure('switch-conflict', 'Git refused to create the branch because uncommitted changes conflict with it.', { branch: name, detail: excerpt(stderr), hint: 'Commit or stash the changes, then retry.' });
+      }
+      return failure('switch-failed', `Git could not create branch ${name}.`, { branch: name, detail: excerpt(stderr) });
+    }
+    this.cache.clear();
+    return { ok: true, branch: name, mode: 'created', dirtyCount: status.dirtyCount, carried: status.dirtyCount > 0 };
+  }
+
+  /**
    * Switch the session checkout to a local or remote branch, in place.
    * @param {object} request - session, target branch, and dirty-tree consent.
    * @param {AbortSignal} signal - operation cancellation.

@@ -5,6 +5,18 @@
  */
 
 export const en = {
+  'create.branchAction': "Branch",
+  'create.worktreeAction': "Permanent worktree",
+  'create.branchTitle': "Create and check out a branch here",
+  'create.worktreeTitle': "Create a permanent worktree",
+  'create.branchSubmit': "Create branch",
+  'create.worktreeSubmit': "Create worktree",
+  'create.submitting': "Creating…",
+  'create.branchOk': "Created and checked out {branch}",
+  'create.worktreeOk': "Created worktree for {branch} at {path}",
+  'confirm.dirtyCreate.title': "Uncommitted changes",
+  'confirm.dirtyCreate.body': "This checkout has {n} uncommitted change(s). Branch {branch} keeps them as uncommitted work.",
+  'confirm.dirtyCreate.proceed': "Create anyway",
   'trigger.branch': 'Branch',
   'trigger.noRepo': 'No repository',
   'trigger.detached': 'Detached',
@@ -83,6 +95,18 @@ export const en = {
 };
 
 export const zh = {
+  'create.branchAction': "分支",
+  'create.worktreeAction': "永久工作树",
+  'create.branchTitle': "在当前检出创建并迁出分支",
+  'create.worktreeTitle': "创建永久工作树",
+  'create.branchSubmit': "创建分支",
+  'create.worktreeSubmit': "创建工作树",
+  'create.submitting': "创建中…",
+  'create.branchOk': "已创建并迁出分支 {branch}",
+  'create.worktreeOk': "已为 {branch} 创建永久工作树：{path}",
+  'confirm.dirtyCreate.title': "存在未提交更改",
+  'confirm.dirtyCreate.body': "当前检出有 {n} 个未提交更改。分支 {branch} 会把这些更改作为未提交内容保留。",
+  'confirm.dirtyCreate.proceed': "仍然创建",
   'trigger.branch': '分支',
   'trigger.noRepo': '非 Git 仓库',
   'trigger.detached': '分离头指针',

@@ -153,16 +153,16 @@ function parseEnterRequest(value) {
   };
 }
 
-/** `request: { sessionId, name, startPoint?, openInSession? }` — worktree for this workspace. */
-function parseCreateSessionRequest(value) {
+/** `request: { sessionId, name, startPoint?, allowDirty? }` — branch in place, no worktree. */
+function parseBranchRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
   const startPoint = optionalString(value.startPoint, 'request.startPoint');
-  const openInSession = optionalBoolean(value.openInSession, 'request.openInSession');
+  const allowDirty = optionalBoolean(value.allowDirty, 'request.allowDirty');
   return {
     sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
     name: nonEmptyString(value.name, 'request.name'),
     ...(startPoint === undefined || startPoint === null ? {} : { startPoint }),
-    ...(openInSession === undefined ? {} : { openInSession }),
+    ...(allowDirty === undefined ? {} : { allowDirty }),
   };
 }
 
@@ -209,10 +209,10 @@ const DESCRIPTORS = Object.freeze([
     resultCodec('GitStatusValue', 'current checkout, branches, and worktrees of the session repository')),
   method('switchBranch', param('request', parseSwitchRequest, 'session, target branch, and dirty-tree consent'),
     resultCodec('SwitchBranchValue', 'switch outcome or a structured state that needs a user decision')),
+  method('createBranch', param('request', parseBranchRequest, 'session, new branch name, start point, and dirty consent'),
+    resultCodec('CreateBranchValue', 'branch created and checked out in the current checkout')),
   method('createWorktree', param('request', parseCreateRequest, 'session, new branch name, and optional start point'),
     resultCodec('CreateWorktreeValue', 'created worktree checkout under the pool, or a structured failure')),
-  method('createWorktreeSession', param('request', parseCreateSessionRequest, 'session, branch name, and optional start point'),
-    resultCodec('CreateWorktreeValue', 'a worktree joined to the current workspace, or a structured failure')),
   method('enterWorktree', param('request', parseEnterRequest, 'session that should move into an existing checkout'),
     resultCodec('EnterWorktreeValue', 'committed working directory after the move, or a structured failure')),
   method('removeWorktree', param('request', parseRemoveRequest, 'session, pool worktree path, and force consent'),
@@ -239,6 +239,18 @@ function endpointOf(name) {
  */
 
 const en = {
+  'create.branchAction': "Branch",
+  'create.worktreeAction': "Permanent worktree",
+  'create.branchTitle': "Create and check out a branch here",
+  'create.worktreeTitle': "Create a permanent worktree",
+  'create.branchSubmit': "Create branch",
+  'create.worktreeSubmit': "Create worktree",
+  'create.submitting': "Creating…",
+  'create.branchOk': "Created and checked out {branch}",
+  'create.worktreeOk': "Created worktree for {branch} at {path}",
+  'confirm.dirtyCreate.title': "Uncommitted changes",
+  'confirm.dirtyCreate.body': "This checkout has {n} uncommitted change(s). Branch {branch} keeps them as uncommitted work.",
+  'confirm.dirtyCreate.proceed': "Create anyway",
   'trigger.branch': 'Branch',
   'trigger.noRepo': 'No repository',
   'trigger.detached': 'Detached',
@@ -317,6 +329,18 @@ const en = {
 };
 
 const zh = {
+  'create.branchAction': "分支",
+  'create.worktreeAction': "永久工作树",
+  'create.branchTitle': "在当前检出创建并迁出分支",
+  'create.worktreeTitle': "创建永久工作树",
+  'create.branchSubmit': "创建分支",
+  'create.worktreeSubmit': "创建工作树",
+  'create.submitting': "创建中…",
+  'create.branchOk': "已创建并迁出分支 {branch}",
+  'create.worktreeOk': "已为 {branch} 创建永久工作树：{path}",
+  'confirm.dirtyCreate.title': "存在未提交更改",
+  'confirm.dirtyCreate.body': "当前检出有 {n} 个未提交更改。分支 {branch} 会把这些更改作为未提交内容保留。",
+  'confirm.dirtyCreate.proceed': "仍然创建",
   'trigger.branch': '分支',
   'trigger.noRepo': '非 Git 仓库',
   'trigger.detached': '分离头指针',
@@ -473,6 +497,7 @@ const CSS = `
 
 /* footer: create form */
 .dsh-wt-panel .dsh-wt-footer{border-top:1px solid var(--dsw-alias-border-l1);padding:4px;flex:none;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-overlay))}
+.dsh-wt-panel .dsh-wt-create-rows{display:flex;flex-direction:column;gap:2px}
 .dsh-wt-panel .dsh-wt-create-toggle{display:flex;align-items:center;gap:7px;width:100%;padding:5px 7px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:18px;cursor:pointer}
 .dsh-wt-panel .dsh-wt-create-toggle:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07))}
 .dsh-wt-panel .dsh-wt-create-toggle:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:default}
@@ -656,6 +681,34 @@ function createWorktreeApi(ctx) {
     return result.value;
   };
 
+  /** Workspace covering one directory, derived from member session directories. */
+  const workspaceOfDirectory = (path) => {
+    const normalize = (value) => (typeof value === 'string' ? value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : '');
+    const list = sessions.list.getSnapshot();
+    const registry = workspaces.list.getSnapshot();
+    const owners = new Map();
+    for (const workspace of registry.items ?? []) {
+      for (const sessionId of workspace.sessionIds ?? []) owners.set(sessionId, workspace.workspaceId);
+    }
+    const target = normalize(path);
+    if (target === '') return null;
+    let bestId = null;
+    let bestLength = -1;
+    for (const id of list.ids ?? []) {
+      const summary = list.byId?.[id];
+      if (summary === undefined) continue;
+      const cwd = normalize(summary.cwd);
+      if (cwd === '' || !(target === cwd || target.startsWith(`${cwd}/`))) continue;
+      const owner = owners.get(id);
+      if (owner === undefined) continue;
+      if (cwd.length > bestLength) {
+        bestLength = cwd.length;
+        bestId = owner;
+      }
+    }
+    return bestId;
+  };
+
   return {
     /** Whether the namespace is mounted. */
     available: true,
@@ -669,11 +722,11 @@ function createWorktreeApi(ctx) {
     /** In-place branch switch with structured state outcomes. */
     switchBranch: (request) => call('switchBranch', request),
 
+    /** Create a branch and check it out in the current checkout (no worktree). */
+    createBranch: (request) => call('createBranch', request),
+
     /** Create one branch and its checkout under the pool. */
     createWorktree: (request) => call('createWorktree', request),
-
-    /** Create one worktree joined to the current workspace (no new workspace). */
-    createWorktreeSession: (request) => call('createWorktreeSession', request),
 
     /** Move one session into an existing checkout. */
     enterWorktree: (request) => call('enterWorktree', request),
@@ -685,14 +738,20 @@ function createWorktreeApi(ctx) {
      * Open a session whose working directory is one worktree checkout.
      *
      * A worktree is a checkout of the *current* workspace, not a workspace of
-     * its own: this reveals an existing session already pointed at the
-     * directory, and otherwise creates a session with that `cwd` directly, so
-     * the sidebar keeps one workspace group instead of growing a group per
-     * worktree.
+     * its own. Two cases:
+     *  - a session already points at the directory: just reveal it;
+     *  - otherwise create the session **inside the current workspace** (so it
+     *    keeps an owner, stays visible in the sidebar, and leaves the composer
+     *    usable) and then move its working directory onto the checkout.
+     *
+     * Creating with `{ cwd }` alone is deliberately avoided: such a session has
+     * no workspace, which drops the UI back to the "choose a workspace" hero
+     * state with a disabled composer.
      * @param {string} path - checkout directory.
+     * @param {string | null} workspaceId - workspace the new session joins.
      * @returns the session id that was opened or revealed.
      */
-    async openSessionInDirectory(path) {
+    async openSessionInDirectory(path, workspaceId = null) {
       const list = sessions.list.getSnapshot();
       const registry = workspaces.list.getSnapshot();
       const archived = new Set(registry.archivedSessionIds ?? []);
@@ -714,12 +773,23 @@ function createWorktreeApi(ctx) {
         uiWorkspace.openSession(latest);
         return latest;
       }
-      const created = await sessions.create({ cwd: path });
-      if (typeof created === 'string' && created.length > 0) {
-        uiWorkspace.openSession(created);
-        return created;
-      }
-      return null;
+      const owner = workspaceId ?? this.workspaceOf(path);
+      const created = owner === null ? null : await sessions.create({ workspaceId: owner });
+      const sessionId = typeof created === 'string' ? created : (created?.sessionId ?? null);
+      if (sessionId === null) return null;
+      const moved = await call('enterWorktree', { sessionId, path });
+      if (moved.ok !== true) return sessionId;
+      uiWorkspace.openSession(sessionId);
+      return sessionId;
+    },
+
+    /**
+     * Workspace that owns a directory, resolved through its session directories.
+     * @param {string} path - directory to attribute.
+     * @returns the workspace id, or null when no workspace covers it.
+     */
+    workspaceOf(path) {
+      return workspaceOfDirectory(path);
     },
   };
 }
@@ -1046,7 +1116,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
   const [confirm, setConfirm] = useState(null);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
-  const [creating, setCreating] = useState(false);
+  const [mode, setMode] = useState(null);
   const [themeVars, setThemeVars] = useState(undefined);
   const pending = status === undefined && loading !== true;
   const searchRef = useRef(null);
@@ -1110,7 +1180,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
   // Expanding the create form (or a confirm block) grows content below the fold;
   // scroll it into view so the form is never clipped under the branch list.
   useEffect(() => {
-    if (creating !== true) return;
+    if (mode === null) return;
     const body = bodyRef.current;
     if (body === null) return;
     const frame = requestAnimationFrame(() => {
@@ -1119,7 +1189,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [creating]);
+  }, [mode]);
 
   const afterMutation = useCallback((message) => {
     store.invalidate();
@@ -1217,21 +1287,46 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     }
   }, [api, sessionId, afterMutation, fail, t]);
 
-  const createBranch = useCallback(async ({ name, startPoint, openSession }) => {
+  /** Atomic action 1: create a branch and check it out in this checkout. */
+  const createBranch = useCallback(async ({ name, startPoint, allowDirty = false }) => {
     setBusy({ kind: 'create', name });
     setError(null);
     try {
-      const value = await api.createWorktreeSession({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }) });
+      const value = await api.createBranch({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }), ...(allowDirty ? { allowDirty: true } : {}) });
+      if (value.ok !== true) {
+        if (value.code === 'dirty-tree') {
+          setConfirm({ kind: 'dirty-create', branch: value.branch ?? name, count: value.dirtyCount ?? 0 });
+        } else {
+          fail(t('error.createFailed'), value);
+        }
+        return false;
+      }
+      afterMutation(t('create.branchOk', { branch: value.branch }));
+      return true;
+    } catch (cause) {
+      fail(t('error.createFailed'), { message: cause instanceof Error ? cause.message : String(cause) });
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }, [api, sessionId, afterMutation, fail, t]);
+
+  /** Atomic action 2: create a linked checkout under the pool, leaving this one untouched. */
+  const createWorktreeBranch = useCallback(async ({ name, startPoint, openSession }) => {
+    setBusy({ kind: 'worktree', name });
+    setError(null);
+    try {
+      const value = await api.createWorktree({ sessionId, name, ...(startPoint === undefined ? {} : { startPoint }) });
       if (value.ok !== true) {
         fail(t('error.createFailed'), value);
         return false;
       }
-      afterMutation(t('create.ok', { branch: value.branch, path: value.path }));
-      if (openSession) {
-        await api.openSessionInDirectory(value.path);
-        onClose();
-      } else {
+      afterMutation(t('create.worktreeOk', { branch: value.branch, path: value.path }));
+      if (openSession === false) {
         await enterDirectory(value.path);
+      } else {
+        await api.openSessionInDirectory(value.path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
+        onClose();
       }
       return true;
     } catch (cause) {
@@ -1289,32 +1384,31 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
             'data-testid': 'dsh-worktree-not-repo',
             children: pending === true ? t('panel.sessionPending') : t('panel.notRepo'),
           }),
-          status?.isRepo === true && jsxs('div', {
-                className: 'dsh-wt-current',
-                'data-testid': 'dsh-worktree-current',
+          confirm !== null && confirm.kind === 'dirty-create' && jsxs('div', {
+            className: 'dsh-wt-confirm',
+            'data-testid': 'dsh-worktree-confirm-dirty-create',
+            children: [
+              jsxs('span', { className: 'dsh-wt-confirm-title', children: [jsx(WarningIcon, { size: 14 }), t('confirm.dirtyCreate.title')] }),
+              jsx('span', { className: 'dsh-wt-confirm-body', children: t('confirm.dirtyCreate.body', { n: String(confirm.count), branch: confirm.branch }) }),
+              jsxs('div', {
+                className: 'dsh-wt-confirm-actions',
                 children: [
-                  jsx('span', { className: 'dsh-wt-current-icon', children: status.isWorktree === true ? jsx(WorktreeIcon, {}) : jsx(BranchIcon, {}) }),
-                  jsxs('div', {
-                    className: 'dsh-wt-current-main',
-                    children: [
-                      jsxs('span', { className: 'dsh-wt-current-title', children: [
-                        status.branch ?? t('trigger.detached'),
-                        status.isWorktree === true && jsx('span', { className: 'dsh-wt-badge', 'data-tone': 'brand', style: { marginLeft: 6 }, children: 'worktree' }),
-                        status.isWorktree === true && status.worktreeName !== null && status.worktreeName !== undefined && jsx('span', { className: 'dsh-wt-badge', style: { marginLeft: 4 }, children: status.worktreeName }),
-                      ] }),
-                      jsxs('span', {
-                        className: 'dsh-wt-current-sub',
-                        'data-tone': (currentDirty ?? 0) > 0 ? 'warn' : undefined,
-                        children: [
-                          (currentDirty ?? 0) > 0 ? dirtyLabel(t, currentDirty) : t('status.clean'),
-                          status.ahead !== undefined && status.ahead > 0 && status.behind !== undefined && status.behind > 0 ? ` · ${t('status.aheadBehind', { ahead: String(status.ahead), behind: String(status.behind) })}` : null,
-                          status.upstream != null ? ` · ${t('status.upstream', { upstream: status.upstream })}` : null,
-                        ],
-                      }),
-                    ],
+                  jsx('button', { type: 'button', className: 'dsh-wt-button', 'data-variant': 'plain', onClick: () => { setConfirm(null); }, children: t('error.cancel') }),
+                  jsx('button', {
+                    type: 'button',
+                    className: 'dsh-wt-button',
+                    'data-variant': 'primary',
+                    onClick: () => {
+                      const branch = confirm.branch;
+                      setConfirm(null);
+                      void createBranch({ name: branch, allowDirty: true });
+                    },
+                    children: t('confirm.dirtyCreate.proceed'),
                   }),
                 ],
               }),
+            ],
+          }),
           confirm !== null && confirm.kind === 'dirty' && jsxs('div', {
             className: 'dsh-wt-confirm',
             'data-testid': 'dsh-worktree-confirm-dirty',
@@ -1324,7 +1418,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
               jsxs('div', {
                 className: 'dsh-wt-confirm-actions',
                 children: [
-                  jsx('button', { type: 'button', className: 'dsh-wt-button', 'data-variant': 'plain', onClick: () => { setConfirm(null); setCreating({ name: confirm.branch }); }, children: t('confirm.dirty.worktree') }),
+                  jsx('button', { type: 'button', className: 'dsh-wt-button', 'data-variant': 'plain', onClick: () => { setConfirm(null); setMode('worktree'); }, children: t('confirm.dirty.worktree') }),
                   jsx('button', { type: 'button', className: 'dsh-wt-button', 'data-variant': 'primary', onClick: () => { void switchTo(confirm.branch, true); }, children: t('confirm.dirty.proceed') }),
                 ],
               }),
@@ -1379,82 +1473,6 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
           status?.isRepo === true && jsxs('div', {
             className: 'dsh-wt-section',
             children: [
-              jsxs('div', {
-                className: 'dsh-wt-section-title',
-                children: [jsx(FolderIcon, { size: 12 }), t('panel.worktreesSection'), jsx('span', { className: 'dsh-wt-section-extra', title: status.poolPath, children: status.poolPath })],
-              }),
-              branches.worktrees.length === 0
-                ? jsx('div', { className: 'dsh-wt-note', children: t('panel.noWorktrees') })
-                : branches.worktrees.map((entry) => {
-                    const isCurrent = cwd !== undefined && (entry.path === cwd || cwd.startsWith(entry.path));
-                    return jsxs('button', {
-                      type: 'button',
-                      className: 'dsh-wt-row',
-                      'data-kind': entry.isMain === true ? 'main' : 'worktree',
-                      'data-testid': `dsh-worktree-row-${entry.name}`,
-                      onClick: () => {
-                        void openDirectory(entry.path);
-                      },
-                      children: [
-                        jsx('span', {
-                          className: 'dsh-wt-row-icon',
-                          children: entry.isMain === true || entry.inPool !== true ? jsx(BranchIcon, {}) : jsx(WorktreeIcon, {}),
-                        }),
-                        jsxs('span', {
-                          className: 'dsh-wt-row-main',
-                          children: [
-                            jsxs('span', { className: 'dsh-wt-row-title', children: [
-                              jsx('span', { className: 'dsh-wt-row-name', children: entry.name }),
-                              entry.isMain === true && jsx('span', { className: 'dsh-wt-badge', children: t('status.mainCheckout') }),
-                              entry.inPool === false && entry.isMain === false && jsx('span', { className: 'dsh-wt-badge', children: '.agents' }),
-                            ] }),
-                            jsxs('span', {
-                              className: 'dsh-wt-row-sub',
-                              'data-tone': (entry.dirtyCount ?? 0) > 0 ? 'warn' : undefined,
-                              children: [
-                                entry.branch ?? (entry.detached === true ? t('trigger.detached') : '—'),
-                                dirtyLabel(t, entry.dirtyCount) !== null ? ` · ${dirtyLabel(t, entry.dirtyCount)}` : '',
-                              ],
-                            }),
-                          ],
-                        }),
-                        isCurrent === true && jsx('span', { className: 'dsh-wt-row-here', children: t('row.here') }),
-                        jsxs('span', {
-                          className: 'dsh-wt-row-actions',
-                          children: [
-                            entry.isMain !== true && jsx('button', {
-                              type: 'button',
-                              className: 'dsh-wt-iconbtn',
-                              title: t('row.enter'),
-                              'aria-label': t('row.enter'),
-                              onClick: (event) => {
-                                event.stopPropagation();
-                                void enterDirectory(entry.path);
-                              },
-                              children: jsx(BranchIcon, { size: 13 }),
-                            }),
-                            entry.isMain !== true && jsx('button', {
-                              type: 'button',
-                              className: 'dsh-wt-iconbtn',
-                              'data-tone': 'danger',
-                              title: t('row.remove'),
-                              'aria-label': t('row.remove'),
-                              onClick: (event) => {
-                                event.stopPropagation();
-                                void removeWorktree(entry.path);
-                              },
-                              children: jsx(TrashIcon, { size: 13 }),
-                            }),
-                          ],
-                        }),
-                      ],
-                    }, entry.path);
-                  }),
-            ],
-          }),
-          status?.isRepo === true && jsxs('div', {
-            className: 'dsh-wt-section',
-            children: [
               jsx('div', { className: 'dsh-wt-section-title', children: t('panel.localSection') }),
               branches.locals.map((branch) => {
                 const isCurrent = branch.current === true;
@@ -1489,12 +1507,13 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
           }),
         ],
       }),
-      jsx(CreateForm, {
+      jsx(CreateFooter, {
         status,
         busy,
-        creating,
-        setCreating,
+        mode,
+        setMode,
         createBranch,
+        createWorktreeBranch,
         t,
       }),
     ],
@@ -1502,42 +1521,66 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
 }
 
 /**
- * The collapsible footer form for "create and check out new branch".
+ * Footer with the two atomic create actions.
+ *
+ * "Branch" creates a branch and checks it out in the current checkout; "Permanent
+ * worktree" creates a linked checkout under the pool and leaves the current
+ * checkout untouched. Each action expands its own small form, so neither one
+ * silently performs the other's side effect.
  */
-function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
+function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktreeBranch, t }) {
   const [name, setName] = useState('');
   const [startPoint, setStartPoint] = useState('');
   const [openSession, setOpenSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const nameRef = useRef(null);
   useEffect(() => {
-    if (creating !== null && typeof creating === 'object' && creating.name !== undefined) {
-      setName(creating.name);
-      setCreating(false);
-    }
-  }, [creating, setCreating]);
-  useEffect(() => {
-    if (creating === true) nameRef.current?.focus({ preventScroll: true });
-  }, [creating]);
+    if (mode === null) return;
+    setName('');
+    setStartPoint('');
+    const frame = requestAnimationFrame(() => {
+      nameRef.current?.focus({ preventScroll: true });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [mode]);
   const options = useMemo(() => {
     const locals = (status?.branches ?? []).filter((branch) => branch.kind === 'local').map((branch) => branch.name);
-    const remotes = (status?.branches ?? []).filter((branch) => branch.kind === 'remote' && branch.hasLocal !== true).map((branch) => branch.name);
-    return { locals, remotes };
+    return { locals };
   }, [status]);
-  const disabled = status?.isRepo !== true || (busy?.kind === 'create');
-  const expanded = creating === true;
+  const disabled = status?.isRepo !== true || busy?.kind === 'create' || busy?.kind === 'worktree';
+  const expanded = mode !== null;
+  const title = mode === 'worktree' ? t('create.worktreeTitle') : t('create.branchTitle');
+  const submitLabel = mode === 'worktree' ? t('create.worktreeSubmit') : t('create.branchSubmit');
+  const run = mode === 'worktree' ? createWorktreeBranch : createBranch;
   return jsxs('div', {
     className: 'dsh-wt-footer',
     children: [
-      expanded !== true && jsxs('button', {
-        type: 'button',
-        className: 'dsh-wt-create-toggle',
-        disabled,
-        onClick: () => {
-          setCreating(true);
-        },
-        'data-testid': 'dsh-worktree-create-toggle',
-        children: [jsx(PlusIcon, { size: 14 }), t('create.title')],
+      expanded !== true && jsxs('div', {
+        className: 'dsh-wt-create-rows',
+        children: [
+          jsxs('button', {
+            type: 'button',
+            className: 'dsh-wt-create-toggle',
+            disabled,
+            onClick: () => {
+              setMode('branch');
+            },
+            'data-testid': 'dsh-worktree-create-branch',
+            children: [jsx(PlusIcon, { size: 14 }), t('create.branchAction')],
+          }),
+          jsxs('button', {
+            type: 'button',
+            className: 'dsh-wt-create-toggle',
+            disabled,
+            onClick: () => {
+              setMode('worktree');
+            },
+            'data-testid': 'dsh-worktree-create-worktree',
+            children: [jsx(WorktreeIcon, { size: 14 }), t('create.worktreeAction')],
+          }),
+        ],
       }),
       expanded === true && jsxs('form', {
         className: 'dsh-wt-create-form',
@@ -1546,7 +1589,7 @@ function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
           if (name.trim().length === 0 || submitting === true) return;
           setSubmitting(true);
           try {
-            const done = await createBranch({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint, openSession });
+            const done = await run({ name: name.trim(), startPoint: startPoint.length === 0 ? undefined : startPoint, openSession });
             if (done === true) {
               setName('');
               setStartPoint('');
@@ -1559,7 +1602,7 @@ function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
           jsxs('div', {
             className: 'dsh-wt-field',
             children: [
-              jsx('label', { htmlFor: 'dsh-wt-create-name', children: t('create.title') }),
+              jsx('label', { htmlFor: 'dsh-wt-create-name', children: title }),
               jsx('input', {
                 ref: nameRef,
                 id: 'dsh-wt-create-name',
@@ -1587,12 +1630,11 @@ function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
                 children: [
                   jsx('option', { value: '', children: t('create.fromHead') }),
                   ...options.locals.map((value) => jsx('option', { value, children: value }, `local:${value}`)),
-                  ...options.remotes.map((value) => jsx('option', { value, children: value }, `remote:${value}`)),
                 ],
               }),
             ],
           }),
-          jsx('label', {
+          mode === 'worktree' && jsx('label', {
             className: 'dsh-wt-checkbox',
             children: [
               jsx('input', {
@@ -1608,14 +1650,14 @@ function CreateForm({ status, busy, creating, setCreating, createBranch, t }) {
           jsxs('div', {
             className: 'dsh-wt-create-actions',
             children: [
-              jsx('button', { type: 'button', className: 'dsh-wt-button', 'data-variant': 'plain', onClick: () => { setCreating(false); }, children: t('error.cancel') }),
+              jsx('button', { type: 'button', className: 'dsh-wt-button', 'data-variant': 'plain', onClick: () => { setMode(null); }, children: t('error.cancel') }),
               jsxs('button', {
                 type: 'submit',
                 className: 'dsh-wt-button',
                 'data-variant': 'primary',
-                disabled: name.trim().length === 0 || submitting === true || busy?.kind === 'create',
+                disabled: name.trim().length === 0 || submitting === true,
                 'data-testid': 'dsh-worktree-create-submit',
-                children: submitting === true || busy?.kind === 'create' ? t('create.creating') : t('create.submit'),
+                children: submitting === true ? t('create.submitting') : submitLabel,
               }),
             ],
           }),
@@ -1703,30 +1745,6 @@ function SessionHoverInfo({ sessionId, worktree, useSessions, t }) {
     ],
   });
 }
-
-/**
- * Far-right session header chip: branch (and worktree name when linked).
- */
-function SessionHeaderChip({ sessionId, worktree, useSessions, t }) {
-  const cwd = useSessionCwd(useSessions, sessionId);
-  const info = useGitInfo(worktree.store, cwd);
-  if (info === undefined || info.isRepo !== true) return null;
-  const isWorktree = info.isWorktree === true;
-  const branch = (isWorktree === true ? info.worktreeBranch : info.branch) ?? info.branch ?? '';
-  const label = isWorktree === true
-    ? t('header.worktree', { branch: branch === '' ? '—' : branch, name: info.worktreeName ?? '' })
-    : t('header.branch', { branch: branch === '' ? t('trigger.detached') : branch });
-  return jsxs('span', {
-    className: 'dsh-wt-chip',
-    'data-variant': isWorktree === true ? 'worktree' : 'branch',
-    'data-testid': 'dsh-worktree-header-chip',
-    title: cwd,
-    children: [
-      jsx('span', { className: 'dsh-wt-chip-icon', children: isWorktree === true ? jsx(WorktreeIcon, { size: 13 }) : jsx(BranchIcon, { size: 13 }) }),
-      jsx('span', { className: 'dsh-wt-chip-label', children: label }),
-    ],
-  });
-}
 //#endregion
 
 //#region client/entry.js
@@ -1782,14 +1800,6 @@ async function applyInner(ctx) {
     locale: 'worktree',
     inject: (sessionId) => ({ sessionId, worktree: bundle }),
   }, BranchPicker));
-
-  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
-    id: 'dsh-worktree-chip',
-    order: 5,
-    locale: 'worktree',
-    inject: (sessionId) => ({ sessionId, worktree: bundle }),
-  }, SessionHeaderChip));
 
   ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register({
     name: 'sidebar.session.row.leading',

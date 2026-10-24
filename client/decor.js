@@ -75,26 +75,3 @@ export function SessionHoverInfo({ sessionId, worktree, useSessions, t }) {
   });
 }
 
-/**
- * Far-right session header chip: branch (and worktree name when linked).
- */
-export function SessionHeaderChip({ sessionId, worktree, useSessions, t }) {
-  const cwd = useSessionCwd(useSessions, sessionId);
-  const info = useGitInfo(worktree.store, cwd);
-  if (info === undefined || info.isRepo !== true) return null;
-  const isWorktree = info.isWorktree === true;
-  const branch = (isWorktree === true ? info.worktreeBranch : info.branch) ?? info.branch ?? '';
-  const label = isWorktree === true
-    ? t('header.worktree', { branch: branch === '' ? '—' : branch, name: info.worktreeName ?? '' })
-    : t('header.branch', { branch: branch === '' ? t('trigger.detached') : branch });
-  return jsxs('span', {
-    className: 'dsh-wt-chip',
-    'data-variant': isWorktree === true ? 'worktree' : 'branch',
-    'data-testid': 'dsh-worktree-header-chip',
-    title: cwd,
-    children: [
-      jsx('span', { className: 'dsh-wt-chip-icon', children: isWorktree === true ? jsx(WorktreeIcon, { size: 13 }) : jsx(BranchIcon, { size: 13 }) }),
-      jsx('span', { className: 'dsh-wt-chip-label', children: label }),
-    ],
-  });
-}

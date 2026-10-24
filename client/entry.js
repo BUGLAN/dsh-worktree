@@ -51,14 +51,6 @@ async function applyInner(ctx) {
     inject: (sessionId) => ({ sessionId, worktree: bundle }),
   }, BranchPicker));
 
-  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
-    id: 'dsh-worktree-chip',
-    order: 5,
-    locale: 'worktree',
-    inject: (sessionId) => ({ sessionId, worktree: bundle }),
-  }, SessionHeaderChip));
-
   ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register({
     name: 'sidebar.session.row.leading',
     id: 'dsh-worktree-mark',

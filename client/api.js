@@ -29,6 +29,34 @@ export function createWorktreeApi(ctx) {
     return result.value;
   };
 
+  /** Workspace covering one directory, derived from member session directories. */
+  const workspaceOfDirectory = (path) => {
+    const normalize = (value) => (typeof value === 'string' ? value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : '');
+    const list = sessions.list.getSnapshot();
+    const registry = workspaces.list.getSnapshot();
+    const owners = new Map();
+    for (const workspace of registry.items ?? []) {
+      for (const sessionId of workspace.sessionIds ?? []) owners.set(sessionId, workspace.workspaceId);
+    }
+    const target = normalize(path);
+    if (target === '') return null;
+    let bestId = null;
+    let bestLength = -1;
+    for (const id of list.ids ?? []) {
+      const summary = list.byId?.[id];
+      if (summary === undefined) continue;
+      const cwd = normalize(summary.cwd);
+      if (cwd === '' || !(target === cwd || target.startsWith(`${cwd}/`))) continue;
+      const owner = owners.get(id);
+      if (owner === undefined) continue;
+      if (cwd.length > bestLength) {
+        bestLength = cwd.length;
+        bestId = owner;
+      }
+    }
+    return bestId;
+  };
+
   return {
     /** Whether the namespace is mounted. */
     available: true,
@@ -42,11 +70,11 @@ export function createWorktreeApi(ctx) {
     /** In-place branch switch with structured state outcomes. */
     switchBranch: (request) => call('switchBranch', request),
 
+    /** Create a branch and check it out in the current checkout (no worktree). */
+    createBranch: (request) => call('createBranch', request),
+
     /** Create one branch and its checkout under the pool. */
     createWorktree: (request) => call('createWorktree', request),
-
-    /** Create one worktree joined to the current workspace (no new workspace). */
-    createWorktreeSession: (request) => call('createWorktreeSession', request),
 
     /** Move one session into an existing checkout. */
     enterWorktree: (request) => call('enterWorktree', request),
@@ -58,14 +86,20 @@ export function createWorktreeApi(ctx) {
      * Open a session whose working directory is one worktree checkout.
      *
      * A worktree is a checkout of the *current* workspace, not a workspace of
-     * its own: this reveals an existing session already pointed at the
-     * directory, and otherwise creates a session with that `cwd` directly, so
-     * the sidebar keeps one workspace group instead of growing a group per
-     * worktree.
+     * its own. Two cases:
+     *  - a session already points at the directory: just reveal it;
+     *  - otherwise create the session **inside the current workspace** (so it
+     *    keeps an owner, stays visible in the sidebar, and leaves the composer
+     *    usable) and then move its working directory onto the checkout.
+     *
+     * Creating with `{ cwd }` alone is deliberately avoided: such a session has
+     * no workspace, which drops the UI back to the "choose a workspace" hero
+     * state with a disabled composer.
      * @param {string} path - checkout directory.
+     * @param {string | null} workspaceId - workspace the new session joins.
      * @returns the session id that was opened or revealed.
      */
-    async openSessionInDirectory(path) {
+    async openSessionInDirectory(path, workspaceId = null) {
       const list = sessions.list.getSnapshot();
       const registry = workspaces.list.getSnapshot();
       const archived = new Set(registry.archivedSessionIds ?? []);
@@ -87,12 +121,23 @@ export function createWorktreeApi(ctx) {
         uiWorkspace.openSession(latest);
         return latest;
       }
-      const created = await sessions.create({ cwd: path });
-      if (typeof created === 'string' && created.length > 0) {
-        uiWorkspace.openSession(created);
-        return created;
-      }
-      return null;
+      const owner = workspaceId ?? this.workspaceOf(path);
+      const created = owner === null ? null : await sessions.create({ workspaceId: owner });
+      const sessionId = typeof created === 'string' ? created : (created?.sessionId ?? null);
+      if (sessionId === null) return null;
+      const moved = await call('enterWorktree', { sessionId, path });
+      if (moved.ok !== true) return sessionId;
+      uiWorkspace.openSession(sessionId);
+      return sessionId;
+    },
+
+    /**
+     * Workspace that owns a directory, resolved through its session directories.
+     * @param {string} path - directory to attribute.
+     * @returns the workspace id, or null when no workspace covers it.
+     */
+    workspaceOf(path) {
+      return workspaceOfDirectory(path);
     },
   };
 }

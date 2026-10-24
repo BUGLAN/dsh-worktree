@@ -134,16 +134,16 @@ function parseEnterRequest(value) {
   };
 }
 
-/** `request: { sessionId, name, startPoint?, openInSession? }` — worktree for this workspace. */
-function parseCreateSessionRequest(value) {
+/** `request: { sessionId, name, startPoint?, allowDirty? }` — branch in place, no worktree. */
+function parseBranchRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
   const startPoint = optionalString(value.startPoint, 'request.startPoint');
-  const openInSession = optionalBoolean(value.openInSession, 'request.openInSession');
+  const allowDirty = optionalBoolean(value.allowDirty, 'request.allowDirty');
   return {
     sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
     name: nonEmptyString(value.name, 'request.name'),
     ...(startPoint === undefined || startPoint === null ? {} : { startPoint }),
-    ...(openInSession === undefined ? {} : { openInSession }),
+    ...(allowDirty === undefined ? {} : { allowDirty }),
   };
 }
 
@@ -190,10 +190,10 @@ export const DESCRIPTORS = Object.freeze([
     resultCodec('GitStatusValue', 'current checkout, branches, and worktrees of the session repository')),
   method('switchBranch', param('request', parseSwitchRequest, 'session, target branch, and dirty-tree consent'),
     resultCodec('SwitchBranchValue', 'switch outcome or a structured state that needs a user decision')),
+  method('createBranch', param('request', parseBranchRequest, 'session, new branch name, start point, and dirty consent'),
+    resultCodec('CreateBranchValue', 'branch created and checked out in the current checkout')),
   method('createWorktree', param('request', parseCreateRequest, 'session, new branch name, and optional start point'),
     resultCodec('CreateWorktreeValue', 'created worktree checkout under the pool, or a structured failure')),
-  method('createWorktreeSession', param('request', parseCreateSessionRequest, 'session, branch name, and optional start point'),
-    resultCodec('CreateWorktreeValue', 'a worktree joined to the current workspace, or a structured failure')),
   method('enterWorktree', param('request', parseEnterRequest, 'session that should move into an existing checkout'),
     resultCodec('EnterWorktreeValue', 'committed working directory after the move, or a structured failure')),
   method('removeWorktree', param('request', parseRemoveRequest, 'session, pool worktree path, and force consent'),

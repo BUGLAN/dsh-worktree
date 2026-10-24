@@ -75,6 +75,7 @@ export const CSS = `
 
 /* footer: create form */
 .dsh-wt-panel .dsh-wt-footer{border-top:1px solid var(--dsw-alias-border-l1);padding:4px;flex:none;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-overlay))}
+.dsh-wt-panel .dsh-wt-create-rows{display:flex;flex-direction:column;gap:2px}
 .dsh-wt-panel .dsh-wt-create-toggle{display:flex;align-items:center;gap:7px;width:100%;padding:5px 7px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:18px;cursor:pointer}
 .dsh-wt-panel .dsh-wt-create-toggle:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07))}
 .dsh-wt-panel .dsh-wt-create-toggle:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:default}

@@ -201,6 +201,22 @@ try {
   value = await service.switchBranch({ sessionId: 's1', branch: 'main', allowDirty: true });
   check('switch: back to main carrying', value.ok === true && value.branch === 'main');
 
+  // --- createBranch (atomic: branch in place, no worktree) -----------------
+  value = await service.createBranch({ sessionId: 's1', name: 'inplace-1' });
+  check('createBranch: dirty needs consent', value.ok === false && value.code === 'dirty-tree', JSON.stringify(value));
+  value = await service.createBranch({ sessionId: 's1', name: 'inplace-1', allowDirty: true });
+  check('createBranch: ok', value.ok === true && value.mode === 'created', JSON.stringify(value));
+  check('createBranch: branch exists', (await service.status('s1')).branches.some((b) => b.name === 'inplace-1'));
+  check('createBranch: no worktree added', (await service.status('s1')).worktrees.length === 2);
+  value = await service.createBranch({ sessionId: 's1', name: 'inplace-1' });
+  check('createBranch: duplicate rejected', value.ok === false && value.code === 'branch-exists');
+  value = await service.createBranch({ sessionId: 's1', name: '../bad' });
+  check('createBranch: invalid name rejected', value.ok === false && value.code === 'invalid-name');
+  value = await service.createBranch({ sessionId: 's1', name: 'inplace-1' });
+  check('createBranch: existing branch rejected', value.ok === false && value.code === 'branch-exists');
+  value = await service.createBranch({ sessionId: 'ghost', name: 'x-1' });
+  check('createBranch: cold session mapped', value.ok === false && value.code === 'session-unavailable');
+
   // --- switchBranch: remote-only -------------------------------------------
   await git(repo, 'update-ref', 'refs/remotes/origin/remote-only', 'HEAD');
   value = await service.switchBranch({ sessionId: 's1', branch: 'origin/remote-only', allowDirty: true });
