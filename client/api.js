@@ -109,7 +109,24 @@ export function createWorktreeApi(ctx) {
      * @param {string | null} workspaceId - workspace the new session joins.
      * @returns the session id that was opened or revealed.
      */
-    async openSessionInDirectory(path, workspaceId = null) {
+    /**
+     * Open a session whose working directory is one worktree checkout.
+     *
+     * A worktree is a checkout of the *current* workspace, not a workspace of
+     * its own. Two cases:
+     *  - a session already points at the directory: just reveal it;
+     *  - otherwise create the session inside `ownerWorkspaceId` (so it keeps an
+     *    owner, stays visible in the sidebar, and leaves the composer usable),
+     *    then move its working directory onto the checkout.
+     *
+     * `ownerWorkspaceId` must be the workspace the *caller* belongs to. Deriving
+     * it from the new checkout's path cannot work: nothing lives there yet, so no
+     * workspace covers it and the session would never be created.
+     * @param {string} path - checkout directory.
+     * @param {string | null} ownerWorkspaceId - workspace the new session joins.
+     * @returns the session id that was opened or revealed.
+     */
+    async openSessionInDirectory(path, ownerWorkspaceId = null) {
       const list = sessions.list.getSnapshot();
       const registry = workspaces.list.getSnapshot();
       const archived = new Set(registry.archivedSessionIds ?? []);
@@ -131,14 +148,44 @@ export function createWorktreeApi(ctx) {
         uiWorkspace.openSession(latest);
         return latest;
       }
-      const owner = workspaceId ?? this.workspaceOf(path);
-      const created = owner === null ? null : await sessions.create({ workspaceId: owner });
+      if (ownerWorkspaceId === null) return null;
+      const created = await sessions.create({ workspaceId: ownerWorkspaceId });
       const sessionId = typeof created === 'string' ? created : (created?.sessionId ?? null);
       if (sessionId === null) return null;
-      const moved = await call('enterWorktree', { sessionId, path });
-      if (moved.ok !== true) return sessionId;
+      // Open first, then move: `workingDirectory.set` needs a live agent, and a
+      // freshly created session has none until the Host opens it.
       uiWorkspace.openSession(sessionId);
+      const moved = await this.moveWithRetry(sessionId, path);
+      if (moved.ok !== true) {
+        throw new Error(moved.message ?? `could not move the new session into ${path}`);
+      }
       return sessionId;
+    },
+
+    /**
+     * Move a session's working directory, waiting for its agent to come up.
+     *
+     * A session created moments ago is not open in the Host yet, and the move
+     * answers `session-unavailable` until it is. Retrying keeps the caller's flow
+     * linear instead of making every call site handle that race.
+     * @param {string} sessionId - session to move.
+     * @param {string} path - target checkout directory.
+     * @returns the Host result of the last attempt.
+     */
+    async moveWithRetry(sessionId, path) {
+      let last = { ok: false, message: 'session never became available' };
+      for (const delay of [150, 300, 600, 1200, 2000]) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, delay);
+        });
+        // Raw remote call: `call()` throws on failure, but this loop needs the
+        // result object to tell a transient "not open yet" from a real error.
+        const result = await remoteOf().enterWorktree({ sessionId, path });
+        last = result.ok === true ? result.value : result.error;
+        if (last.ok === true) return last;
+        if (last.code !== 'session-unavailable') return last;
+      }
+      return last;
     },
 
     /**
@@ -157,14 +204,23 @@ export function createWorktreeApi(ctx) {
  *
  * Rows request their session's directory; lookups are batched on a short
  * timer, answered from cache while fresh, and republished to subscribers.
+ *
+ * Session-scoped facts are cached separately. `workingDirectory.set` moves the
+ * directory the agent runs in, but the framework's session summary keeps
+ * reporting the original `cwd`, so a sidebar row cannot learn from it that a
+ * session moved into a worktree. Asking the plugin's own `status` does know, and
+ * this second cache keeps that answer close to the row that needs it.
  * @module dsh-worktree/client/store
  */
 export class GitInfoStore {
-  constructor(api, { ttlMs = 15000, flushDelayMs = 40 } = {}) {
+  constructor(api, { ttlMs = 15000, flushDelayMs = 40, sessionTtlMs = 15000 } = {}) {
     this.api = api;
     this.ttlMs = ttlMs;
     this.flushDelayMs = flushDelayMs;
+    this.sessionTtlMs = sessionTtlMs;
     this.entries = new Map();
+    /** Session-scoped facts; the Host's session summary cannot report these. */
+    this.sessions = new Map();
     this.pending = new Set();
     this.listeners = new Set();
     this.version = 0;
@@ -176,6 +232,34 @@ export class GitInfoStore {
   currentOf(path) {
     if (path === undefined || path === null || path === '') return undefined;
     return this.entries.get(path)?.value;
+  }
+
+  /** Latest cached worktree facts of one session, `undefined` when unknown. */
+  currentSessionOf(sessionId) {
+    if (sessionId === undefined || sessionId === null || sessionId === '') return undefined;
+    const entry = this.sessions.get(sessionId);
+    if (entry === undefined) {
+      this.requestSession(sessionId);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  /** Ask the plugin for one session's checkout facts, deduplicated and cached. */
+  requestSession(sessionId) {
+    const entry = this.sessions.get(sessionId);
+    if (entry !== undefined && entry.expires > Date.now()) return;
+    if (entry !== undefined && entry.inflight === true) return;
+    this.sessions.set(sessionId, { value: entry?.value, expires: Date.now() + 1000, inflight: true });
+    this.api.status(sessionId)
+      .then((value) => {
+        this.sessions.set(sessionId, { value, expires: Date.now() + this.sessionTtlMs, inflight: false });
+        this.version += 1;
+        this.publish();
+      })
+      .catch(() => {
+        this.sessions.set(sessionId, { value: entry?.value, expires: Date.now() + 3000, inflight: false });
+      });
   }
 
   /** Subscribe to any store change; returns the disposer. */

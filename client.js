@@ -483,15 +483,14 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-section-title::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--dsw-alias-border-l1),transparent)}
 .dsh-wt-panel .dsh-wt-section-title .dsh-wt-section-extra{margin-left:0;font-family:inherit;font-weight:400;text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;font-size:10px;opacity:.75}
 
-/* worktree form: fixed directory prefix + branch name + slug preview */
-.dsh-wt-panel .dsh-wt-create-prefix{display:inline-flex;align-items:center;flex:none;height:28px;padding:0 0 0 7px;border:1px solid var(--dsw-alias-border-l2);border-right:none;border-radius:6px 0 0 6px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#fff) 5%,transparent);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
-.dsh-wt-panel .dsh-wt-create-prefix-dir{letter-spacing:-.01em}
-.dsh-wt-panel .dsh-wt-create-prefix-sep{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));padding:0 1px}
-.dsh-wt-panel .dsh-wt-create-form .dsh-wt-create-name[value]{border-radius:0 6px 6px 0}
-.dsh-wt-panel .dsh-wt-create-form.has-prefix .dsh-wt-create-name{border-radius:0 6px 6px 0}
-/* branch rows: the pool directory id leads the branch name */
+/* worktree form: the id prefix is painted inside the field, not beside it */
+.dsh-wt-panel .dsh-wt-create-field{display:flex;align-items:center;flex:1;min-width:0;height:28px;padding:0 8px 0 0;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);transition:border-color .12s ease,box-shadow .12s ease}
+.dsh-wt-panel .dsh-wt-create-field:focus-within{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary,#4d8dff) 18%,transparent)}
+.dsh-wt-panel .dsh-wt-create-field .dsh-wt-create-prefix{flex:none;padding:0 0 0 8px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap;user-select:none}
+.dsh-wt-panel .dsh-wt-create-field .dsh-wt-create-name{flex:1;min-width:0;height:26px;padding:0;border:none;background:transparent;box-shadow:none}
+.dsh-wt-panel .dsh-wt-create-field .dsh-wt-create-name:focus{border:none;box-shadow:none}
+/* branch rows: icon colour only; the label keeps full contrast */
 .dsh-wt-panel .dsh-wt-row[data-kind="worktree"] .dsh-wt-row-icon,.dsh-wt-panel .dsh-wt-row-icon[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
-.dsh-wt-panel .dsh-wt-row-dir{flex:none;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11px;letter-spacing:-.01em}
 
 /* rows */
 .dsh-wt-panel .dsh-wt-row{display:flex;align-items:center;gap:8px;width:100%;padding:5px 11px;margin:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;text-align:left;cursor:pointer;border-radius:0;animation:dsh-wt-row-in .16s ease both}
@@ -801,7 +800,24 @@ function createWorktreeApi(ctx) {
      * @param {string | null} workspaceId - workspace the new session joins.
      * @returns the session id that was opened or revealed.
      */
-    async openSessionInDirectory(path, workspaceId = null) {
+    /**
+     * Open a session whose working directory is one worktree checkout.
+     *
+     * A worktree is a checkout of the *current* workspace, not a workspace of
+     * its own. Two cases:
+     *  - a session already points at the directory: just reveal it;
+     *  - otherwise create the session inside `ownerWorkspaceId` (so it keeps an
+     *    owner, stays visible in the sidebar, and leaves the composer usable),
+     *    then move its working directory onto the checkout.
+     *
+     * `ownerWorkspaceId` must be the workspace the *caller* belongs to. Deriving
+     * it from the new checkout's path cannot work: nothing lives there yet, so no
+     * workspace covers it and the session would never be created.
+     * @param {string} path - checkout directory.
+     * @param {string | null} ownerWorkspaceId - workspace the new session joins.
+     * @returns the session id that was opened or revealed.
+     */
+    async openSessionInDirectory(path, ownerWorkspaceId = null) {
       const list = sessions.list.getSnapshot();
       const registry = workspaces.list.getSnapshot();
       const archived = new Set(registry.archivedSessionIds ?? []);
@@ -823,14 +839,44 @@ function createWorktreeApi(ctx) {
         uiWorkspace.openSession(latest);
         return latest;
       }
-      const owner = workspaceId ?? this.workspaceOf(path);
-      const created = owner === null ? null : await sessions.create({ workspaceId: owner });
+      if (ownerWorkspaceId === null) return null;
+      const created = await sessions.create({ workspaceId: ownerWorkspaceId });
       const sessionId = typeof created === 'string' ? created : (created?.sessionId ?? null);
       if (sessionId === null) return null;
-      const moved = await call('enterWorktree', { sessionId, path });
-      if (moved.ok !== true) return sessionId;
+      // Open first, then move: `workingDirectory.set` needs a live agent, and a
+      // freshly created session has none until the Host opens it.
       uiWorkspace.openSession(sessionId);
+      const moved = await this.moveWithRetry(sessionId, path);
+      if (moved.ok !== true) {
+        throw new Error(moved.message ?? `could not move the new session into ${path}`);
+      }
       return sessionId;
+    },
+
+    /**
+     * Move a session's working directory, waiting for its agent to come up.
+     *
+     * A session created moments ago is not open in the Host yet, and the move
+     * answers `session-unavailable` until it is. Retrying keeps the caller's flow
+     * linear instead of making every call site handle that race.
+     * @param {string} sessionId - session to move.
+     * @param {string} path - target checkout directory.
+     * @returns the Host result of the last attempt.
+     */
+    async moveWithRetry(sessionId, path) {
+      let last = { ok: false, message: 'session never became available' };
+      for (const delay of [150, 300, 600, 1200, 2000]) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, delay);
+        });
+        // Raw remote call: `call()` throws on failure, but this loop needs the
+        // result object to tell a transient "not open yet" from a real error.
+        const result = await remoteOf().enterWorktree({ sessionId, path });
+        last = result.ok === true ? result.value : result.error;
+        if (last.ok === true) return last;
+        if (last.code !== 'session-unavailable') return last;
+      }
+      return last;
     },
 
     /**
@@ -849,14 +895,23 @@ function createWorktreeApi(ctx) {
  *
  * Rows request their session's directory; lookups are batched on a short
  * timer, answered from cache while fresh, and republished to subscribers.
+ *
+ * Session-scoped facts are cached separately. `workingDirectory.set` moves the
+ * directory the agent runs in, but the framework's session summary keeps
+ * reporting the original `cwd`, so a sidebar row cannot learn from it that a
+ * session moved into a worktree. Asking the plugin's own `status` does know, and
+ * this second cache keeps that answer close to the row that needs it.
  * @module dsh-worktree/client/store
  */
 class GitInfoStore {
-  constructor(api, { ttlMs = 15000, flushDelayMs = 40 } = {}) {
+  constructor(api, { ttlMs = 15000, flushDelayMs = 40, sessionTtlMs = 15000 } = {}) {
     this.api = api;
     this.ttlMs = ttlMs;
     this.flushDelayMs = flushDelayMs;
+    this.sessionTtlMs = sessionTtlMs;
     this.entries = new Map();
+    /** Session-scoped facts; the Host's session summary cannot report these. */
+    this.sessions = new Map();
     this.pending = new Set();
     this.listeners = new Set();
     this.version = 0;
@@ -868,6 +923,34 @@ class GitInfoStore {
   currentOf(path) {
     if (path === undefined || path === null || path === '') return undefined;
     return this.entries.get(path)?.value;
+  }
+
+  /** Latest cached worktree facts of one session, `undefined` when unknown. */
+  currentSessionOf(sessionId) {
+    if (sessionId === undefined || sessionId === null || sessionId === '') return undefined;
+    const entry = this.sessions.get(sessionId);
+    if (entry === undefined) {
+      this.requestSession(sessionId);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  /** Ask the plugin for one session's checkout facts, deduplicated and cached. */
+  requestSession(sessionId) {
+    const entry = this.sessions.get(sessionId);
+    if (entry !== undefined && entry.expires > Date.now()) return;
+    if (entry !== undefined && entry.inflight === true) return;
+    this.sessions.set(sessionId, { value: entry?.value, expires: Date.now() + 1000, inflight: true });
+    this.api.status(sessionId)
+      .then((value) => {
+        this.sessions.set(sessionId, { value, expires: Date.now() + this.sessionTtlMs, inflight: false });
+        this.version += 1;
+        this.publish();
+      })
+      .catch(() => {
+        this.sessions.set(sessionId, { value: entry?.value, expires: Date.now() + 3000, inflight: false });
+      });
   }
 
   /** Subscribe to any store change; returns the disposer. */
@@ -1122,8 +1205,13 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
   }, [refresh, cwd]);
 
   const variant = status?.isRepo && status.isWorktree ? 'worktree' : 'branch';
+  // A worktree reads as `<directory>/<branch>` so the trigger names both the
+  // checkout and what is checked out in it.
+  const worktreeLabel = status?.isRepo === true && status.isWorktree === true
+    ? [status.worktreeName, status.branch].filter((part) => typeof part === 'string' && part.length > 0).join('/')
+    : '';
   const label = status?.isRepo === true
-    ? (status.isWorktree ? (status.worktreeName ?? status.branch ?? '') : (status.branch ?? t('trigger.detached')))
+    ? (status.isWorktree ? (worktreeLabel.length > 0 ? worktreeLabel : (status.branch ?? '')) : (status.branch ?? t('trigger.detached')))
     : status?.isRepo === false && loading !== true
       ? t('trigger.noRepo')
       : t('trigger.loading');
@@ -1309,7 +1397,8 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     setError(null);
     setConfirm(null);
     try {
-      await api.openSessionInDirectory(path);
+      // Open the checkout inside the workspace this session already belongs to.
+      await api.openSessionInDirectory(path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
       setToast(t('hint.sessionOpened', { name: baseName(path) }));
       onClose();
     } catch (cause) {
@@ -1317,7 +1406,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     } finally {
       setBusy(null);
     }
-  }, [api, fail, onClose, t]);
+  }, [api, fail, onClose, t, cwd, status]);
 
 
   const removeWorktree = useCallback(async (path, force = false) => {
@@ -1575,13 +1664,14 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                       children: [
                         jsx('span', {
                           className: 'dsh-wt-row-title',
-                          children: jsxs(Fragment, {
-                            children: [
-                              // A pool branch reads as `wt-1a2b/feat-abc`: the id is
-                              // the directory the checkout lives in, so it leads.
-                              branch.worktree !== null && jsx('span', { className: 'dsh-wt-row-dir', children: `${baseName(branch.worktree.path)}/` }),
-                              jsx('span', { className: 'dsh-wt-row-name', children: branch.name }),
-                            ],
+                          children: jsx('span', {
+                            className: 'dsh-wt-row-name',
+                            // One string, one colour: `wt-1a2b/feat-abc`. The id is
+                            // the directory the checkout lives in, so it leads, but
+                            // dimming it made the row unreadable.
+                            children: branch.worktree === null
+                              ? branch.name
+                              : `${baseName(branch.worktree.path)}/${branch.name}`,
                           }),
                         }),
                         isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
@@ -1701,31 +1791,34 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           }
         },
         children: [
-          // One row: the checkout directory, the branch name, its start point,
-          // and the confirm action. In worktree mode the fixed `wt-xxxx/` prefix
-          // is rendered as a non-editable label so the user sees the directory
-          // the checkout will get, while only the branch name is typed and sent.
-          mode === 'worktree' && jsxs('span', {
-            className: 'dsh-wt-create-prefix',
-            title: t('create.prefixHint'),
+          // One field that reads as a single value: `wt-xxxx/` is a fixed prefix
+          // painted inside the input's own box, and the branch name is edited
+          // right after it. Two separate boxes made the directory look like a
+          // second, unrelated control.
+          jsxs('div', {
+            className: 'dsh-wt-create-field',
+            'data-mode': mode,
             children: [
-              jsx('span', { className: 'dsh-wt-create-prefix-dir', children: worktreeId }),
-              jsx('span', { className: 'dsh-wt-create-prefix-sep', children: '/' }),
+              mode === 'worktree' && jsxs('span', {
+                className: 'dsh-wt-create-prefix',
+                title: t('create.prefixHint'),
+                children: [worktreeId, '/'],
+              }),
+              jsx('input', {
+                ref: nameRef,
+                id: 'dsh-wt-create-name',
+                className: 'dsh-wt-create-name',
+                type: 'text',
+                value: name,
+                placeholder: mode === 'worktree' ? t('create.worktreePlaceholder') : t('create.branchPlaceholder'),
+                'aria-label': title,
+                autoComplete: 'off',
+                spellCheck: false,
+                onChange: (event) => {
+                  setName(event.target.value);
+                },
+              }),
             ],
-          }),
-          jsx('input', {
-            ref: nameRef,
-            id: 'dsh-wt-create-name',
-            className: 'dsh-wt-create-name',
-            type: 'text',
-            value: name,
-            placeholder: mode === 'worktree' ? t('create.worktreePlaceholder') : t('create.branchPlaceholder'),
-            'aria-label': title,
-            autoComplete: 'off',
-            spellCheck: false,
-            onChange: (event) => {
-              setName(event.target.value);
-            },
           }),
           jsxs('select', {
             id: 'dsh-wt-create-from',
@@ -1778,9 +1871,25 @@ function useSessionCwd(useSessions, sessionId) {
 function useGitInfo(store, path) {
   const [snap, setSnap] = useState(() => store.currentOf(path));
   useEffect(() => {
+    if (path === undefined) {
+      setSnap(undefined);
+      return undefined;
+    }
     setSnap(store.currentOf(path));
     return store.watch(path, setSnap);
   }, [store, path]);
+  return snap;
+}
+
+/** Subscribe one session to the store's session-scoped facts. */
+function useSessionInfo(store, sessionId) {
+  const [snap, setSnap] = useState(() => store.currentSessionOf(sessionId));
+  useEffect(() => {
+    setSnap(store.currentSessionOf(sessionId));
+    return store.subscribe(() => {
+      setSnap(store.currentSessionOf(sessionId));
+    });
+  }, [store, sessionId]);
   return snap;
 }
 
@@ -1788,10 +1897,10 @@ function useGitInfo(store, path) {
  * Leading 16px cell mark: a worktree glyph only for a *linked* checkout, a
  * plain branch glyph for the main checkout, nothing outside a repository.
  *
- * The main checkout must never get the worktree glyph: it owns `.git`, so
- * showing a "permanent worktree" mark there would claim a directory that is
- * the repository itself. `isWorktree` comes from the Host, which decides it by
- * comparing `git-dir` with `git-common-dir` rather than by list position.
+ * The mark reads the session's checkout facts from the plugin's own `status`,
+ * not from the framework's session summary. Moving a session into a worktree
+ * changes the directory the agent runs in while the summary keeps reporting the
+ * original `cwd`, so the summary cannot tell a worktree session from a plain one.
  * @param props.sessionId - row session identity (owner props).
  * @param props.worktree - the API bundle ({ api, store }).
  * @param props.useSessions - framework hook over the sessions snapshot.
@@ -1799,13 +1908,17 @@ function useGitInfo(store, path) {
  */
 function SessionLeadingMark({ sessionId, worktree, useSessions, t }) {
   const cwd = useSessionCwd(useSessions, sessionId);
-  const info = useGitInfo(worktree.store, cwd);
-  if (info === undefined || info.isRepo !== true) return null;
-  const isWorktree = info.isWorktree === true && info.worktreeName !== null && info.worktreeName !== undefined;
-  const branch = (isWorktree === true ? info.worktreeBranch : info.branch) ?? info.branch ?? '';
+  // Prefer the session's own facts; fall back to the directory lookup while the
+  // first status call is still in flight so a row never flashes empty.
+  const sessionInfo = useSessionInfo(worktree.store, sessionId);
+  const info = useGitInfo(worktree.store, sessionInfo === undefined && cwd !== undefined ? cwd : undefined);
+  const facts = sessionInfo ?? info;
+  if (facts === undefined || facts.isRepo !== true) return null;
+  const isWorktree = facts.isWorktree === true && facts.worktreeName !== null && facts.worktreeName !== undefined;
+  const branch = (isWorktree === true ? facts.worktreeBranch ?? facts.branch : facts.branch) ?? facts.branch ?? '';
   const title = isWorktree === true
-    ? t('sidebar.worktreeTitle', { name: info.worktreeName ?? '', branch })
-    : t('sidebar.branchTitle', { branch: branch === '' ? info.branch ?? '' : branch });
+    ? t('sidebar.worktreeTitle', { name: facts.worktreeName ?? '', branch })
+    : t('sidebar.branchTitle', { branch: branch === '' ? facts.branch ?? '' : branch });
   return jsx('span', {
     className: 'dsh-wt-leading',
     'data-variant': isWorktree === true ? 'worktree' : 'branch',
@@ -1819,15 +1932,20 @@ function SessionLeadingMark({ sessionId, worktree, useSessions, t }) {
 
 /**
  * Hover-card section: the worktree/branch identity of the hovered session.
+ *
+ * Uses the same session facts as the row mark, so a hovered worktree row always
+ * reports the worktree the mark is showing.
  */
 function SessionHoverInfo({ sessionId, worktree, useSessions, t }) {
   const cwd = useSessionCwd(useSessions, sessionId);
-  const info = useGitInfo(worktree.store, cwd);
-  if (info === undefined || info.isRepo !== true) return null;
-  const isWorktree = info.isWorktree === true;
-  const branch = (isWorktree === true ? info.worktreeBranch : info.branch) ?? info.branch ?? '';
+  const sessionInfo = useSessionInfo(worktree.store, sessionId);
+  const info = useGitInfo(worktree.store, sessionInfo === undefined && cwd !== undefined ? cwd : undefined);
+  const facts = sessionInfo ?? info;
+  if (facts === undefined || facts.isRepo !== true) return null;
+  const isWorktree = facts.isWorktree === true;
+  const branch = (isWorktree === true ? facts.worktreeBranch ?? facts.branch : facts.branch) ?? facts.branch ?? '';
   const text = isWorktree === true
-    ? t('sidebar.worktreeLine', { name: info.worktreeName ?? '', branch: branch === '' ? '—' : branch })
+    ? t('sidebar.worktreeLine', { name: facts.worktreeName ?? '', branch: branch === '' ? '—' : branch })
     : t('sidebar.branchLine', { branch: branch === '' ? '—' : branch });
   return jsxs('div', {
     className: 'dsh-wt-hover',
@@ -1835,7 +1953,7 @@ function SessionHoverInfo({ sessionId, worktree, useSessions, t }) {
     'data-testid': 'dsh-worktree-hover-info',
     children: [
       jsx('span', { className: 'dsh-wt-hover-icon', children: isWorktree === true ? jsx(WorktreeIcon, { size: 13 }) : jsx(BranchIcon, { size: 13 }) }),
-      jsx('span', { className: 'dsh-wt-hover-text', title: cwd, children: text }),
+      jsx('span', { className: 'dsh-wt-hover-text', title: facts.cwd ?? cwd, children: text }),
     ],
   });
 }

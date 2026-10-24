@@ -165,8 +165,13 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
   }, [refresh, cwd]);
 
   const variant = status?.isRepo && status.isWorktree ? 'worktree' : 'branch';
+  // A worktree reads as `<directory>/<branch>` so the trigger names both the
+  // checkout and what is checked out in it.
+  const worktreeLabel = status?.isRepo === true && status.isWorktree === true
+    ? [status.worktreeName, status.branch].filter((part) => typeof part === 'string' && part.length > 0).join('/')
+    : '';
   const label = status?.isRepo === true
-    ? (status.isWorktree ? (status.worktreeName ?? status.branch ?? '') : (status.branch ?? t('trigger.detached')))
+    ? (status.isWorktree ? (worktreeLabel.length > 0 ? worktreeLabel : (status.branch ?? '')) : (status.branch ?? t('trigger.detached')))
     : status?.isRepo === false && loading !== true
       ? t('trigger.noRepo')
       : t('trigger.loading');
@@ -352,7 +357,8 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     setError(null);
     setConfirm(null);
     try {
-      await api.openSessionInDirectory(path);
+      // Open the checkout inside the workspace this session already belongs to.
+      await api.openSessionInDirectory(path, api.workspaceOf(cwd ?? status?.cwd ?? ''));
       setToast(t('hint.sessionOpened', { name: baseName(path) }));
       onClose();
     } catch (cause) {
@@ -360,7 +366,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
     } finally {
       setBusy(null);
     }
-  }, [api, fail, onClose, t]);
+  }, [api, fail, onClose, t, cwd, status]);
 
 
   const removeWorktree = useCallback(async (path, force = false) => {
@@ -618,13 +624,14 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
                       children: [
                         jsx('span', {
                           className: 'dsh-wt-row-title',
-                          children: jsxs(Fragment, {
-                            children: [
-                              // A pool branch reads as `wt-1a2b/feat-abc`: the id is
-                              // the directory the checkout lives in, so it leads.
-                              branch.worktree !== null && jsx('span', { className: 'dsh-wt-row-dir', children: `${baseName(branch.worktree.path)}/` }),
-                              jsx('span', { className: 'dsh-wt-row-name', children: branch.name }),
-                            ],
+                          children: jsx('span', {
+                            className: 'dsh-wt-row-name',
+                            // One string, one colour: `wt-1a2b/feat-abc`. The id is
+                            // the directory the checkout lives in, so it leads, but
+                            // dimming it made the row unreadable.
+                            children: branch.worktree === null
+                              ? branch.name
+                              : `${baseName(branch.worktree.path)}/${branch.name}`,
                           }),
                         }),
                         isCurrent === true && dirtyLabel(t, currentDirty) !== null && (currentDirty ?? 0) > 0
@@ -744,31 +751,34 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
           }
         },
         children: [
-          // One row: the checkout directory, the branch name, its start point,
-          // and the confirm action. In worktree mode the fixed `wt-xxxx/` prefix
-          // is rendered as a non-editable label so the user sees the directory
-          // the checkout will get, while only the branch name is typed and sent.
-          mode === 'worktree' && jsxs('span', {
-            className: 'dsh-wt-create-prefix',
-            title: t('create.prefixHint'),
+          // One field that reads as a single value: `wt-xxxx/` is a fixed prefix
+          // painted inside the input's own box, and the branch name is edited
+          // right after it. Two separate boxes made the directory look like a
+          // second, unrelated control.
+          jsxs('div', {
+            className: 'dsh-wt-create-field',
+            'data-mode': mode,
             children: [
-              jsx('span', { className: 'dsh-wt-create-prefix-dir', children: worktreeId }),
-              jsx('span', { className: 'dsh-wt-create-prefix-sep', children: '/' }),
+              mode === 'worktree' && jsxs('span', {
+                className: 'dsh-wt-create-prefix',
+                title: t('create.prefixHint'),
+                children: [worktreeId, '/'],
+              }),
+              jsx('input', {
+                ref: nameRef,
+                id: 'dsh-wt-create-name',
+                className: 'dsh-wt-create-name',
+                type: 'text',
+                value: name,
+                placeholder: mode === 'worktree' ? t('create.worktreePlaceholder') : t('create.branchPlaceholder'),
+                'aria-label': title,
+                autoComplete: 'off',
+                spellCheck: false,
+                onChange: (event) => {
+                  setName(event.target.value);
+                },
+              }),
             ],
-          }),
-          jsx('input', {
-            ref: nameRef,
-            id: 'dsh-wt-create-name',
-            className: 'dsh-wt-create-name',
-            type: 'text',
-            value: name,
-            placeholder: mode === 'worktree' ? t('create.worktreePlaceholder') : t('create.branchPlaceholder'),
-            'aria-label': title,
-            autoComplete: 'off',
-            spellCheck: false,
-            onChange: (event) => {
-              setName(event.target.value);
-            },
           }),
           jsxs('select', {
             id: 'dsh-wt-create-from',
