@@ -17,7 +17,7 @@
  * @module dsh-worktree
  */
 
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
@@ -311,6 +311,71 @@ export class WorktreeService {
     this.pending = new Map();
     this.lifetime = new AbortController();
     this.disposed = false;
+    /**
+     * Which pool checkout each session belongs to.
+     *
+     * `workingDirectory.set` moves the directory a running agent uses, but it is
+     * runtime state: once the agent goes cold the session's durable header still
+     * names the original cwd. Without this map the same session reports "worktree"
+     * while it is open and "main checkout" after a reload, which is exactly the
+     * icon that seemed to revert. Persisted next to the pool so it survives Host
+     * restarts and can be inspected or deleted by hand.
+     */
+    this.sessionCheckouts = new Map();
+    this.checkoutsLoaded = false;
+    this.checkoutsWritePending = null;
+  }
+
+  /** Path of the session→checkout map inside the pool directory. */
+  get sessionMapPath() {
+    return join(this.options.poolDirectory, '.sessions.json');
+  }
+
+  /** Read the session→checkout map once, tolerating a missing or broken file. */
+  async loadSessionCheckouts(signal) {
+    if (this.checkoutsLoaded) return;
+    this.checkoutsLoaded = true;
+    try {
+      const text = await readFile(this.sessionMapPath, 'utf8');
+      const parsed = JSON.parse(text);
+      if (typeof parsed === 'object' && parsed !== null) {
+        for (const [sessionId, path] of Object.entries(parsed)) {
+          if (typeof path === 'string' && path.length > 0) this.sessionCheckouts.set(sessionId, path);
+        }
+      }
+    } catch {
+      /* No map yet, or it is unreadable: start empty and rewrite on next move. */
+    }
+  }
+
+  /** Persist the session→checkout map, coalescing concurrent writes. */
+  async saveSessionCheckouts() {
+    if (this.checkoutsWritePending !== null) return this.checkoutsWritePending;
+    const payload = { ...Object.fromEntries(this.sessionCheckouts) };
+    this.checkoutsWritePending = (async () => {
+      try {
+        await mkdir(this.options.poolDirectory, { recursive: true });
+        await writeFile(this.sessionMapPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+      } catch {
+        /* The map is an optimisation; losing it only costs a cold re-read. */
+      } finally {
+        this.checkoutsWritePending = null;
+      }
+    })();
+    return this.checkoutsWritePending;
+  }
+
+  /** Record that one session now works in `path`. */
+  async rememberSessionCheckout(sessionId, path) {
+    await this.loadSessionCheckouts(undefined);
+    this.sessionCheckouts.set(sessionId, path);
+    await this.saveSessionCheckouts();
+  }
+
+  /** Forget one session's recorded checkout. */
+  async forgetSessionCheckout(sessionId) {
+    await this.loadSessionCheckouts(undefined);
+    if (this.sessionCheckouts.delete(sessionId)) await this.saveSessionCheckouts();
   }
 
   /** Abort outstanding work when the owning fiber unloads. */
@@ -478,9 +543,12 @@ export class WorktreeService {
   /**
    * Resolve the checkout a session operates on.
    *
-   * Prefers the live Agent so an in-place branch switch is reflected at once,
-   * and falls back to the durable header so cold sessions (most sidebar rows)
-   * still resolve instead of answering `session-unavailable`.
+   * Three sources, most authoritative first:
+   *  1. the live Agent — reflects an in-place branch switch immediately;
+   *  2. the recorded checkout — survives the agent going cold, which is the
+   *     common case for sidebar rows and the only stable answer after a reload;
+   *  3. the durable header — the directory the session last ran in, used when the
+   *     plugin has no record (for example a session moved by other means).
    * @param {string} sessionId - session identity from the Client.
    * @param {AbortSignal} signal - operation cancellation.
    * @returns `{ agent, cwd }` or a structured failure.
@@ -488,6 +556,9 @@ export class WorktreeService {
   async checkoutOf(sessionId, signal) {
     const agent = this.agentOf(sessionId);
     if (agent !== undefined) return { agent, cwd: this.cwdOf(agent) };
+    await this.loadSessionCheckouts(signal);
+    const recorded = this.sessionCheckouts.get(sessionId);
+    if (typeof recorded === 'string' && recorded.length > 0) return { cwd: recorded };
     const cwd = await this.coldCwdOf(sessionId, signal);
     if (cwd === undefined) {
       return failure('session-unavailable', 'This session has no readable working directory yet; open it once and retry.', { sessionId });
@@ -1096,6 +1167,8 @@ export class WorktreeService {
       const cwd = await this.ctx.workingDirectory.set(live, directory, bound);
       // The session's directory changed, so any cached answer about it is stale.
       this.forgetSessionCwd(request.sessionId);
+      // Record it too: the runtime move is invisible once the agent goes cold.
+      await this.rememberSessionCheckout(request.sessionId, directory);
       return { ok: true, cwd };
     } catch (error) {
       return failure('enter-failed', `Could not move the session into ${directory}.`, { path: directory, detail: error instanceof Error ? error.message : String(error) });

@@ -224,6 +224,25 @@ try {
   value = await service.enterWorktree({ sessionId: 's2', path: join(root, 'missing') });
   check('enterWorktree: absent path mapped', value.ok === false && value.code === 'not-a-directory');
 
+  // A moved session must keep reporting the worktree once its Agent goes cold.
+  // `workingDirectory.set` is runtime state, so without the recorded checkout the
+  // same session would revert to the main checkout after a reload.
+  sessions.delete('s2');
+  coldSessions.set('s2', repo);
+  service.cache.delete(`session-cwd:s2`);
+  value = await service.status('s2');
+  check('enterWorktree: cold session still a worktree', value.ok === true && value.isWorktree === true, JSON.stringify(value).slice(0, 200));
+  check('enterWorktree: cold worktree name', value.worktreeName === basename(worktreePath));
+
+  // The record must survive a Host restart: a fresh service over the same pool
+  // reads the map back instead of falling to the session's original cwd.
+  const restarted = new WorktreeService(ctx, resolveOptions({ poolDirectory: pool }));
+  sessions.delete('s2');
+  const afterRestart = await restarted.status('s2');
+  check('enterWorktree: record survives restart', afterRestart.ok === true && afterRestart.isWorktree === true, JSON.stringify(afterRestart).slice(0, 200));
+  check('enterWorktree: restart worktree name', afterRestart.worktreeName === basename(worktreePath));
+  restarted.dispose();
+
   // --- switchBranch: occupied ----------------------------------------------
   value = await service.switchBranch({ sessionId: 's1', branch: 'task-1' });
   check('switch: occupied detected', value.ok === false && value.code === 'branch-occupied' && value.occupiedPath === worktreePath, JSON.stringify(value));
