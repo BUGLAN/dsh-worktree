@@ -925,16 +925,13 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
     : undefined;
   const [status, setStatus] = useState(undefined);
   const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState(false);
   const refresh = useCallback(async () => {
     if (sessionId === undefined) return;
     setLoading(true);
     try {
       const value = await worktree.api.status(sessionId);
       if (value.ok === false && value.code === 'session-unavailable') {
-        // The session's agent is still starting: mark it pending (not "no repo")
-        // and retry a few times before giving up.
-        setPending(true);
+        // The session's agent is still starting; retry briefly before giving up.
         setStatus(undefined);
         for (const delay of [400, 800, 1600]) {
           await new Promise((resolve) => {
@@ -942,15 +939,12 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
           });
           const retry = await worktree.api.status(sessionId);
           if (retry.ok === true) {
-            setPending(false);
             setStatus(retry);
             return;
           }
         }
-        setPending(false);
         setStatus(undefined);
       } else {
-        setPending(false);
         setStatus(value);
       }
     } catch {
@@ -1024,6 +1018,7 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
   const [toast, setToast] = useState(null);
   const [creating, setCreating] = useState(false);
   const [themeVars, setThemeVars] = useState(undefined);
+  const pending = status === undefined && loading !== true;
   const searchRef = useRef(null);
   const bodyRef = useRef(null);
   // The portal lives on document.body, outside the shell's theme scope, so the
