@@ -479,8 +479,8 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-row:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
 .dsh-wt-panel .dsh-wt-row:disabled{cursor:default;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
 .dsh-wt-panel .dsh-wt-row[aria-disabled="true"]{cursor:default;color:var(--dsw-alias-label-primary)}
-.dsh-wt-panel .dsh-wt-row[data-current="true"]{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4d8dff) 10%,transparent);box-shadow:inset 2px 0 0 var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
-.dsh-wt-panel .dsh-wt-row[data-current="true"]:hover{background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4d8dff) 14%,transparent)}
+.dsh-wt-panel .dsh-wt-row[data-current="true"]{color:var(--dsw-alias-label-primary);background:transparent;box-shadow:none;cursor:default}
+.dsh-wt-panel .dsh-wt-row[data-current="true"]:hover{background:transparent}
 .dsh-wt-panel .dsh-wt-row .dsh-wt-row-icon{display:inline-flex;flex:none;opacity:.78}
 .dsh-wt-panel .dsh-wt-row[data-current="true"] .dsh-wt-row-icon{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
 .dsh-wt-panel .dsh-wt-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
@@ -1353,10 +1353,14 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
 
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
-    const locals = (status?.branches ?? []).filter((branch) => branch.kind === 'local');
+    // The picker lists the branches this checkout can switch to. A branch that
+    // another worktree already holds carries an `occupiedPath` from the Host and
+    // is not switchable here, so it is left out — showing it would only offer an
+    // action that gets refused. This is presentation logic and lives here alone.
+    const locals = (status?.branches ?? [])
+      .filter((branch) => branch.kind === 'local' && branch.occupiedPath == null);
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
-      worktrees: (status?.worktrees ?? []).filter((entry) => normalized === '' || (entry.branch ?? entry.name).toLowerCase().includes(normalized)),
       locals: locals.filter(match),
       localsHidden: locals.length - locals.filter(match).length,
     };

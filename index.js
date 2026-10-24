@@ -537,18 +537,16 @@ export class WorktreeService {
         const [name = '', upstream = ''] = line.split('\t');
         return { name, upstream: upstream.length === 0 ? null : upstream };
       });
-    // Only branches that belong to *this* checkout: a branch checked out in
-    // another worktree is that worktree's business, so it is filtered out here
-    // instead of being offered (and then refused) by the picker.
-    const branches = heads
-      .filter((entry) => !worktrees.some((worktree) => worktree.branch === entry.name && !samePath(worktree.path, currentWorktreePath)))
-      .map((entry) => ({
-        name: entry.name,
-        kind: 'local',
-        current: entry.name === status.branch,
-        upstream: entry.upstream,
-        occupiedPath: null,
-      }));
+    // Every local branch of the repository, each annotated with the checkout
+    // that already holds it. Deciding what the picker shows is a presentation
+    // concern, so that filter lives in the Client; the Host reports facts only.
+    const branches = heads.map((entry) => ({
+      name: entry.name,
+      kind: 'local',
+      current: entry.name === status.branch,
+      upstream: entry.upstream,
+      occupiedPath: worktrees.find((worktree) => worktree.branch === entry.name && !samePath(worktree.path, currentWorktreePath))?.path ?? null,
+    }));
     const poolEntries = worktrees.map((entry, index) => ({
       path: entry.path,
       name: basename(entry.path),

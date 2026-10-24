@@ -432,10 +432,14 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, api,
 
   const normalized = query.trim().toLowerCase();
   const branches = useMemo(() => {
-    const locals = (status?.branches ?? []).filter((branch) => branch.kind === 'local');
+    // The picker lists the branches this checkout can switch to. A branch that
+    // another worktree already holds carries an `occupiedPath` from the Host and
+    // is not switchable here, so it is left out — showing it would only offer an
+    // action that gets refused. This is presentation logic and lives here alone.
+    const locals = (status?.branches ?? [])
+      .filter((branch) => branch.kind === 'local' && branch.occupiedPath == null);
     const match = (entry) => normalized === '' || entry.name.toLowerCase().includes(normalized);
     return {
-      worktrees: (status?.worktrees ?? []).filter((entry) => normalized === '' || (entry.branch ?? entry.name).toLowerCase().includes(normalized)),
       locals: locals.filter(match),
       localsHidden: locals.length - locals.filter(match).length,
     };
