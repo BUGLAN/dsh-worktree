@@ -1326,6 +1326,8 @@ class GitInfoStore {
     this.entries = new Map();
     /** Session-scoped facts; the Host's session summary cannot report these. */
     this.sessions = new Map();
+    /** Retry wake-ups for session facts whose last fetch failed. */
+    this.sessionRetryTimers = new Map();
     this.pending = new Set();
     this.listeners = new Set();
     this.version = 0;
@@ -1347,6 +1349,11 @@ class GitInfoStore {
       this.requestSession(sessionId);
       return undefined;
     }
+    // A stale entry is served while it refetches. One failed or aged-out
+    // answer must never pin a row to the summary-cwd fallback: that fallback
+    // reports a moved session's *origin* directory and draws the wrong mark,
+    // so expiry has to re-ask rather than keep serving what it has.
+    if (entry.expires <= Date.now()) this.requestSession(sessionId);
     return entry.value;
   }
 
@@ -1378,7 +1385,27 @@ class GitInfoStore {
       })
       .catch(() => {
         this.sessions.set(sessionId, { value: entry?.value, expires: Date.now() + 3000, inflight: false });
+        this.wakeSession(sessionId);
       });
+  }
+
+  /**
+   * Wake subscribers once a failed session fetch's backoff lapses.
+   *
+   * A failed status call leaves the entry expired in 3s with no value; without
+   * a nudge the row waits for an unrelated render before it asks again, which
+   * for a quiet sidebar may be never — the wrong fallback mark would look
+   * permanent. The timer republishes just past the backoff so
+   * currentSessionOf re-requests on its own.
+   */
+  wakeSession(sessionId) {
+    if (this.sessionRetryTimers.has(sessionId)) return;
+    const timer = setTimeout(() => {
+      this.sessionRetryTimers.delete(sessionId);
+      this.version += 1;
+      this.publish();
+    }, 3200);
+    this.sessionRetryTimers.set(sessionId, timer);
   }
 
   /** Subscribe to any store change; returns the disposer. */
@@ -1459,6 +1486,8 @@ class GitInfoStore {
   dispose() {
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
+    for (const timer of this.sessionRetryTimers.values()) clearTimeout(timer);
+    this.sessionRetryTimers.clear();
     this.pending.clear();
     this.listeners.clear();
   }

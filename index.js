@@ -707,7 +707,15 @@ export class WorktreeService {
     try {
       observed = await query.observeSession(sessionId);
       const header = observed?.header ?? {};
-      const cwd = typeof header.cwd === 'string' && header.cwd.length > 0 ? header.cwd : undefined;
+      // The durable header names the directory the session was *created* in; a
+      // later move lives on as a working-directory event, so the projection is
+      // the fresher answer. A session relocated into a worktree goes cold with
+      // its header still naming the origin checkout, and the sidebar would draw
+      // the origin's mark from it.
+      const projected = observed?.projections?.values?.workingDirectory;
+      const cwd = typeof projected === 'string' && projected.length > 0
+        ? projected
+        : (typeof header.cwd === 'string' && header.cwd.length > 0 ? header.cwd : undefined);
       if (cwd !== undefined) this.cache.set(cacheKey, cwd);
       return cwd;
     } catch {
@@ -741,7 +749,28 @@ export class WorktreeService {
    */
   async checkoutOf(sessionId, signal) {
     const agent = this.agentOf(sessionId);
-    if (agent !== undefined) return { agent, cwd: this.cwdOf(agent) };
+    if (agent !== undefined) {
+      // Prefer ensure over the sync get: right after a restart the sync map
+      // can still report the session's *origin* directory until the agent's
+      // first command runs, while ensure replays the durable
+      // working-directory events. A session moved into a worktree must
+      // resolve to that worktree even in that window, or the sidebar draws
+      // the origin's mark.
+      const directory = this.ctx.workingDirectory;
+      if (directory !== undefined && typeof directory.ensure === 'function') {
+        try {
+          const ensured = await directory.ensure(agent, signal);
+          if (typeof ensured === 'string' && ensured.length > 0) return { agent, cwd: ensured };
+        } catch {
+          /* Not every runtime recovers through ensure; the sync read is next. */
+        }
+      }
+      const cwd = this.cwdOf(agent);
+      if (typeof cwd === 'string' && cwd.length > 0) return { agent, cwd };
+      // A live Agent with no readable directory still has a recorded checkout
+      // (or a durable header). Falling through beats answering an undefined
+      // cwd, which would flatten the whole panel into a non-repo blank.
+    }
     await this.loadSessionCheckouts(signal);
     const recorded = this.sessionCheckouts.get(sessionId);
     if (typeof recorded === 'string' && recorded.length > 0) {

@@ -107,6 +107,10 @@ try {
   const sessions = new Map();
   const workingDirectory = {
     get: (session) => session.cwd,
+    // The runtime's recovering read: replays the durable move events, so it
+    // can disagree with the sync get right after a restart. `ensured` fakes
+    // that disagreement on demand.
+    ensure: async (agent) => agent.session.ensured ?? agent.session.cwd,
     set: async (agent, path) => {
       agent.session.cwd = path;
       agent.moves.push(path);
@@ -122,6 +126,8 @@ try {
   makeSession('s2', repo);
   /** Sessions with a durable header but no live Agent (the sidebar's usual case). */
   const coldSessions = new Map([['s1', repo], ['s2', repo], ['cold', repo]]);
+  /** Latest working-directory event per cold session, as the runtime projects it. */
+  const coldProjections = new Map();
   /** Event logs behind `observeSession`, so blankness is computed like the Host does it. */
   const sessionEvents = new Map();
 
@@ -154,7 +160,14 @@ try {
         if (cold === undefined) {
           throw Object.assign(new Error(`session "${id}" not found`), { code: 'SESSION_QUERY_SESSION_NOT_FOUND' });
         }
-        return { header: { id, cwd: cold }, events: sessionEvents.get(id) ?? [], [Symbol.dispose]: () => {} };
+        return {
+          header: { id, cwd: cold },
+          // The durable header keeps the creation directory; a later move is
+          // projected here, exactly like the runtime's session observations.
+          projections: { values: { workingDirectory: coldProjections.get(id) } },
+          events: sessionEvents.get(id) ?? [],
+          [Symbol.dispose]: () => {},
+        };
       },
     },
   };
@@ -245,6 +258,35 @@ try {
   check('enterWorktree: record survives restart', afterRestart.ok === true && afterRestart.isWorktree === true, JSON.stringify(afterRestart).slice(0, 200));
   check('enterWorktree: restart worktree name', afterRestart.worktreeName === basename(worktreePath));
   restarted.dispose();
+
+  // --- moved session: the fresher directory answer wins --------------------
+  // Right after a restart the sync working-directory map can still report the
+  // session's origin while ensure replays the durable move. The sidebar draws
+  // its mark from this answer, so ensure must outrank the stale sync value —
+  // otherwise a worktree session keeps the origin's branch glyph.
+  sessions.set('s3', makeSession('s3', repo));
+  sessions.get('s3').session.ensured = worktreePath;
+  value = await service.status('s3');
+  check('status: ensure outranks stale sync cwd', value.ok === true && value.isWorktree === true && value.worktreeName === basename(worktreePath), JSON.stringify(value).slice(0, 160));
+  sessions.delete('s3');
+
+  // A live Agent whose directory cannot be read at all still answers through
+  // its recorded checkout instead of degrading the panel to a non-repo blank.
+  sessions.set('s4', { session: { cwd: undefined, ensured: undefined, moves: [] } });
+  await service.rememberSessionCheckout('s4', worktreePath);
+  value = await service.status('s4');
+  check('status: unreadable live cwd falls back to record', value.ok === true && value.isWorktree === true, JSON.stringify(value).slice(0, 160));
+  sessions.delete('s4');
+
+  // Cold path: the header names the creation directory, the projection the
+  // latest move. The projection must win for a session that went cold inside
+  // a worktree it was moved into.
+  coldSessions.set('moved', repo);
+  coldProjections.set('moved', worktreePath);
+  value = await service.status('moved');
+  check('status: cold projection outranks origin header', value.ok === true && value.isWorktree === true && value.worktreeName === basename(worktreePath), JSON.stringify(value).slice(0, 160));
+  coldSessions.delete('moved');
+  coldProjections.delete('moved');
 
   // --- blankness decides who may relocate ----------------------------------
   // A session with no `turn/start` event is pristine: its directory may follow
