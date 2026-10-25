@@ -209,6 +209,59 @@ function parseWorktreeList(stdout) {
   return entries;
 }
 
+/**
+ * Parse `git log --pretty` records: \u001e between commits, \u001f between fields.
+ *
+ * Decorations are read with `--decorate=full` so every ref carries its namespace:
+ * `HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1.0`. Short
+ * decorations cannot tell a remote `origin/main` from a local `feat/x`, which the
+ * graph needs to know, so the full spelling is required here.
+ * @param {string} stdout - complete command output.
+ * @returns one record per commit, refs split by kind.
+ */
+function parseLogRecords(stdout) {
+  const records = [];
+  for (const block of stdout.split('\u001e')) {
+    const text = block.trim();
+    if (text.length === 0) continue;
+    const [hash = '', parents = '', subject = '', author = '', at = '', decorations = ''] = text.split('\u001f');
+    const refs = [];
+    let head = false;
+    for (const token of decorations.split(', ').map((part) => part.trim()).filter((part) => part.length > 0)) {
+      if (token === 'HEAD') {
+        head = true;
+        refs.push({ name: null, kind: 'head' });
+        continue;
+      }
+      const pointer = token.startsWith('HEAD -> ') ? token.slice('HEAD -> '.length) : null;
+      if (pointer !== null) {
+        head = true;
+        refs.push({ name: pointer.startsWith('refs/heads/') ? pointer.slice('refs/heads/'.length) : pointer, kind: 'head' });
+        continue;
+      }
+      const tagged = token.startsWith('tag: ') ? token.slice('tag: '.length) : null;
+      if (tagged !== null) {
+        refs.push({ name: tagged.startsWith('refs/tags/') ? tagged.slice('refs/tags/'.length) : tagged, kind: 'tag' });
+        continue;
+      }
+      if (token.startsWith('refs/heads/')) refs.push({ name: token.slice('refs/heads/'.length), kind: 'local' });
+      else if (token.startsWith('refs/remotes/')) refs.push({ name: token.slice('refs/remotes/'.length), kind: 'remote' });
+      else if (token.startsWith('refs/tags/')) refs.push({ name: token.slice('refs/tags/'.length), kind: 'tag' });
+      else refs.push({ name: token, kind: 'other' });
+    }
+    records.push({
+      hash: hash.trim(),
+      parents: parents.trim().length === 0 ? [] : parents.trim().split(' ').filter((parent) => parent.length > 0),
+      subject,
+      author,
+      at: Number.parseInt(at, 10) || 0,
+      head,
+      refs,
+    });
+  }
+  return records;
+}
+
 /** A relative branch name that cannot escape the pool or break Git's grammar. */
 function isRelativeBranchName(value) {
   if (typeof value !== 'string' || value.length === 0) return false;
@@ -596,7 +649,7 @@ export class WorktreeService {
    * output — means repeated session switches stay warm through a mutation.
    */
   invalidateCheckouts() {
-    for (const prefix of ['inspect:', 'worktrees:', 'dirty:', 'status:', 'heads:']) {
+    for (const prefix of ['inspect:', 'worktrees:', 'dirty:', 'status:', 'heads:', 'log:', 'count:']) {
       this.cache.deletePrefix(prefix);
     }
   }
@@ -812,6 +865,30 @@ export class WorktreeService {
     };
   }
 
+  /**
+   * The repository's trunk branch: origin/HEAD when the remote declares one,
+   * else the conventional main/master, else the main checkout's branch.
+   *
+   * Shared by the panel snapshot (which offers the trunk as a switch target)
+   * and branch deletion, whose "unmerged" count is measured against the trunk.
+   * Cached per repository: the first caller's fallbacks settle the answer.
+   * @param {string} repositoryRoot - main checkout of the repository.
+   * @param {object} options - signal, local branch names, fallback branch.
+   * @returns the trunk branch name, or null when none can be named.
+   */
+  async trunkBranchOf(repositoryRoot, { signal, localNames = [], fallback = null } = {}) {
+    return this.cached('trunk:' + repositoryRoot, async () => {
+      try {
+        const remoteHead = await this.git(repositoryRoot, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], { signal, allowedExitCodes: [0, 1] });
+        const short = remoteHead.stdout.trim().replace(/^refs\/remotes\/[^/]+\//, '');
+        if (short.length > 0) return short;
+      } catch {
+        /* No remote HEAD: fall through to the conventional names. */
+      }
+      return ['main', 'master'].find((name) => localNames.includes(name)) ?? fallback;
+    });
+  }
+
   // --- Remote methods -----------------------------------------------------
 
   /**
@@ -909,15 +986,10 @@ export class WorktreeService {
     // its children the session has moved. `origin/HEAD` is the authoritative
     // spelling; without it fall back to the conventional names, then to
     // whatever the main checkout holds.
-    const trunkBranch = await this.cached(`trunk:${state.repositoryRoot}`, async () => {
-      try {
-        const remoteHead = await this.git(state.repositoryRoot, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], { signal: bound, allowedExitCodes: [0, 1] });
-        const short = remoteHead.stdout.trim().replace(/^refs\/remotes\/[^/]+\//, '');
-        if (short.length > 0) return short;
-      } catch {
-        /* No remote HEAD: fall through to the conventional names. */
-      }
-      return ['main', 'master'].find((name) => heads.some((entry) => entry.name === name)) ?? worktrees[0]?.branch ?? null;
+    const trunkBranch = await this.trunkBranchOf(state.repositoryRoot, {
+      signal: bound,
+      localNames: heads.map((entry) => entry.name),
+      fallback: worktrees[0]?.branch ?? null,
     });
     // Every local branch of the repository, each annotated with the checkout
     // that already holds it and the checkout it was born in. Deciding what the
@@ -1446,6 +1518,144 @@ export class WorktreeService {
     this.invalidateCheckouts();
     return { ok: true, removed: true, path: target };
   }
+  /**
+   * One page of commit history for the graph view.
+   *
+   * --all --date-order matches what 'git log --graph --all' shows: the full DAG
+   * across every ref, newest first, ordered by commit date. Parents travel with
+   * each commit so the Client can lay out lanes without another round trip.
+   * Pages walk the same stream with --skip: date-order is a stable total
+   * order, so a page window stays coherent while the user scrolls. One extra
+   * commit is requested so hasMore is a fact, not a guess.
+   * @param {object} request - session, page size, and offset.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns the page and whether an older one exists.
+   */
+  async log(request, signal) {
+    const bound = this.bind(signal);
+    const checkout = await this.checkoutOf(request.sessionId, bound);
+    if (checkout.ok === false) return checkout;
+    let cwd = checkout.cwd;
+    try {
+      cwd = await this.canonical(cwd, undefined, bound);
+    } catch {
+      /* A missing directory still reports structured, not thrown. */
+    }
+    const state = await this.inspect(cwd, bound);
+    if (!state.isRepo) return failure('not-a-repo', 'This session directory is not a Git repository.', { cwd });
+    const limit = Number.isSafeInteger(request.limit) ? Math.min(Math.max(request.limit, 1), 500) : 200;
+    const skip = Number.isSafeInteger(request.skip) ? Math.max(request.skip, 0) : 0;
+    return this.cached('log:' + state.repositoryRoot + ':' + limit + ':' + skip, async () => {
+      const { stdout } = await this.git(state.repositoryRoot, [
+        'log', '--all', '--date-order', '--decorate=full',
+        '--max-count=' + (limit + 1),
+        ...(skip > 0 ? ['--skip=' + skip] : []),
+        '--pretty=format:%H%x1f%P%x1f%s%x1f%an%x1f%at%x1f%D%x1e',
+      ], { signal: bound });
+      const records = parseLogRecords(stdout);
+      const hasMore = records.length > limit;
+      const commits = (hasMore === true ? records.slice(0, limit) : records)
+        .map((record) => ({ ...record, short: record.hash.slice(0, 7) }));
+      const total = await this.cached('count:' + state.repositoryRoot, async () => {
+        try {
+          const counted = await this.git(state.repositoryRoot, ['rev-list', '--all', '--count'], { signal: bound });
+          return Number.parseInt(counted.stdout.trim(), 10) || 0;
+        } catch {
+          return null;
+        }
+      });
+      return { ok: true, sessionId: request.sessionId, repositoryRoot: state.repositoryRoot, limit, skip, hasMore, total, commits };
+    });
+  }
+
+  /**
+   * Delete one local branch with the same state discipline as switching:
+   * every refusal names the next step instead of leaking a raw stderr.
+   *
+   * '-d' is tried first so Git's own merge check decides; only its
+   * "not fully merged" refusal is translated into the 'unmerged' state. The
+   * count reported there is measured against the trunk branch — the number
+   * the user actually needs before consenting to '-D'. A branch held by any
+   * checkout (including this session's own) is refused before Git is asked,
+   * with the holding path so the UI can route the user straight to it.
+   * @param {object} request - session, branch, and force consent.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns deletion outcome or a structured state that needs a decision.
+   */
+  async deleteBranch(request, signal) {
+    const bound = this.bind(signal);
+    const name = String(request.branch ?? '').trim();
+    if (!isRelativeBranchName(name)) {
+      return failure('invalid-name', '"' + name + '" is not a usable branch name.', { hint: 'Use a name like feature/login: no leading dash, backslash, or dot segments.' });
+    }
+    const checkout = await this.checkoutOf(request.sessionId, bound);
+    if (checkout.ok === false) return checkout;
+    const { cwd } = checkout;
+    const state = await this.inspect(cwd, bound);
+    if (!state.isRepo) return failure('not-a-repo', 'This session directory is not a Git repository.', { cwd });
+    const root = state.repositoryRoot;
+    const exists = await this.git(root, ['show-ref', '--verify', '--quiet', 'refs/heads/' + name], { signal: bound, allowedExitCodes: [0, 1] });
+    if (exists.exitCode !== 0) return failure('branch-not-found', 'Branch ' + name + ' does not exist.', { branch: name });
+    const worktrees = await this.worktreeList(root, bound);
+    const holder = worktrees.find((worktree) => worktree.branch === name);
+    if (holder !== undefined) {
+      const facts = this.worktreeFacts(state, worktrees);
+      const currentWorktreePath = facts.worktreePath ?? root;
+      if (samePath(holder.path, currentWorktreePath)) {
+        return failure('current-branch', 'Branch ' + name + " is checked out in this session's working tree.", {
+          branch: name,
+          hint: 'Switch to another branch first, then delete this one.',
+        });
+      }
+      return failure('branch-occupied', 'Branch ' + name + ' is checked out in worktree ' + holder.path + '.', {
+        branch: name,
+        occupiedPath: holder.path,
+        hint: 'Remove that worktree first; a branch cannot be deleted while one of its checkouts exists.',
+      });
+    }
+    const attempt = async (flag) => {
+      try {
+        await this.git(root, ['branch', flag, '--', name], { signal: bound });
+        this.invalidateCheckouts();
+        return { ok: true, branch: name, mode: 'deleted', forced: flag === '-D' };
+      } catch (error) {
+        if (!(error instanceof GitCommandError)) throw error;
+        return { ok: false, error };
+      }
+    };
+    if (request.force !== true) {
+      const value = await attempt('-d');
+      if (value.ok === true) return value;
+      const stderr = value.error.stderr;
+      if (/not (fully )?merged/i.test(stderr)) {
+        const heads = await this.git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], { signal: bound });
+        const localNames = heads.stdout.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+        const trunk = await this.trunkBranchOf(root, { signal: bound, localNames, fallback: worktrees[0]?.branch ?? null });
+        let unmerged = null;
+        if (trunk !== null) {
+          try {
+            // Commits reachable from this branch but not from the trunk: what
+            // 'git branch -d' would refuse to lose, counted for the consent.
+            const counted = await this.git(root, ['rev-list', '--count', name, '--not', trunk], { signal: bound });
+            unmerged = Number.parseInt(counted.stdout.trim(), 10) || null;
+          } catch {
+            /* The count is advisory; the refusal below stands on its own. */
+          }
+        }
+        return failure('unmerged', 'Branch ' + name + ' has commits not merged into ' + (trunk ?? 'its upstream') + '.', {
+          branch: name,
+          trunk,
+          unmerged,
+          hint: 'Deleting discards those commits; they stay recoverable only through the reflog.',
+        });
+      }
+      return failure('delete-failed', 'Git could not delete ' + name + '.', { branch: name, detail: excerpt(stderr) });
+    }
+    const forced = await attempt('-D');
+    if (forced.ok === true) return forced;
+    return failure('delete-failed', 'Git could not delete ' + name + '.', { branch: name, detail: excerpt(forced.error.stderr) });
+  }
+
 }
 
 /** Environment overrides that disable configured clean, smudge, and process filters. */

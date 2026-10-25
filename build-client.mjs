@@ -22,8 +22,10 @@ const SOURCES = [
   'client/locales.js',
   'client/styles.js',
   'client/icons.js',
+  'client/graph-layout.js',
   'client/api.js',
   'client/panel.js',
+  'client/view.js',
   'client/decor.js',
   'client/entry.js',
 ];

@@ -51,11 +51,17 @@ window.__ModuleLoader__.load({
  *                       repositoryRoot?, upstream? }
  *   EnterWorktreeValue  { ok, code?, message?, hint?, cwd? }
  *   RemoveWorktreeValue { ok, code?, message?, hint?, removed?, path? }
+ *   LogValue           { ok, sessionId, repositoryRoot, limit, skip, hasMore, total?,
+ *                        commits: [{ hash, short, parents, subject, author, at,
+ *                                    head, refs: [{ name, kind }] }] }
+ *   DeleteBranchValue  { ok, code?, message?, hint?, branch?, trunk?, unmerged?,
+ *                        occupiedPath?, mode?, forced? }
  *
  * Failure codes the UI branches on:
  *   not-a-repo, session-unavailable, invalid-name, branch-not-found,
  *   branch-exists, branch-occupied, dirty-tree, switch-conflict, switch-failed,
- *   path-exists, create-failed, remove-failed, dirty-worktree, not-a-directory.
+ *   path-exists, create-failed, remove-failed, dirty-worktree, not-a-directory,
+ *   current-branch, unmerged, delete-failed.
  * @module dsh-worktree/contract
  */
 
@@ -179,6 +185,34 @@ function parseRemoveRequest(value) {
   };
 }
 
+/** `request: { sessionId, limit?, skip? }` — one page of commits for the graph. */
+function parseLogRequest(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const readCount = (raw, field) => {
+    if (raw === undefined || raw === null) return undefined;
+    if (!Number.isSafeInteger(raw)) throw new Error(field + ' must be an integer');
+    return raw;
+  };
+  const limit = readCount(value.limit, 'request.limit');
+  const skip = readCount(value.skip, 'request.skip');
+  return {
+    sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
+    ...(limit === undefined ? {} : { limit }),
+    ...(skip === undefined ? {} : { skip }),
+  };
+}
+
+/** `request: { sessionId, branch, force? }` — delete one local branch. */
+function parseDeleteBranchRequest(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const force = optionalBoolean(value.force, 'request.force');
+  return {
+    sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
+    branch: nonEmptyString(value.branch, 'request.branch'),
+    ...(force === undefined ? {} : { force }),
+  };
+}
+
 /** One direct Remote invocation descriptor. */
 function method(name, parameter, result, optionalSignal = true) {
   return Object.freeze({
@@ -219,6 +253,10 @@ const DESCRIPTORS = Object.freeze([
     resultCodec('EnterWorktreeValue', 'committed working directory after the move, or a structured failure')),
   method('removeWorktree', param('request', parseRemoveRequest, 'session, pool worktree path, and force consent'),
     resultCodec('RemoveWorktreeValue', 'removal outcome or a structured state that needs a user decision')),
+  method('log', param('request', parseLogRequest, 'session, page size, and offset into the date-ordered stream'),
+    resultCodec('LogValue', 'one page of commits with parents and refs, plus whether an older page exists')),
+  method('deleteBranch', param('request', parseDeleteBranchRequest, 'session, branch, and force consent'),
+    resultCodec('DeleteBranchValue', 'deletion outcome or a structured state that needs a user decision')),
 ]);
 
 /** The Client contribution mounted through `ctx.remote.$mount`. */
@@ -325,7 +363,48 @@ const en = {
   'sidebar.branchTitle': 'branch {branch}',
   'sidebar.dirty': '{n} uncommitted',
   'sidebar.worktreeLine': 'Worktree {name} · {branch}',
-  'sidebar.branchLine': 'Branch {branch}',
+  'view.worktree': 'Worktrees',
+  'tab.repo': 'Repository',
+  'tab.upstream': 'Upstream',
+  'tab.dirty': 'Uncommitted',
+  'tab.worktrees': 'Worktrees',
+  'tab.pool': 'Pool',
+  'tab.graph': 'Commits',
+  'tab.commits': '{n} commits',
+  'tab.lanes': '{n} lanes',
+  'tab.refresh': 'Refresh',
+  'tab.graphEmpty': 'No commits yet.',
+  'tab.detached': 'detached',
+  'tab.statusCount': '{wt} worktrees / {br} local branches',
+  'tab.hint': 'Up/Down select · Esc closes layers',
+  'tab.removeWt.body': 'The checkout directory is deleted; branch {branch} is kept.',
+  'tab.delete.title': 'Delete branch {branch}?',
+  'tab.delete.current': 'This branch is checked out in the current working tree. Switch to another branch first.',
+  'tab.delete.occupied': 'This branch is checked out in worktree {path}. Remove that worktree first.',
+  'tab.delete.gotoWt': 'Remove that worktree',
+  'tab.delete.unmerged': '{n} commit(s) not merged into {trunk}. Deleting discards them; the reflog is the only way back.',
+  'tab.delete.upstream': 'its upstream',
+  'tab.delete.forceCheck': 'I understand — force delete (-D)',
+  'tab.delete.force': 'Force delete',
+  'tab.delete.done': 'Deleted {branch}',
+  'detail.author': 'Author',
+  'detail.parents': '{n} parent(s)',
+  'rack.title': 'Worktrees',
+  'rack.poolCount': '{n} in pool',
+  'rack.main': 'main checkout',
+  'rack.clean': 'clean',
+  'rack.dirtyN': '{n} changed',
+  'rack.enter': 'Open session',
+  'rack.remove': 'Remove',
+  'rack.create': '+ New worktree',
+  'branches.local': 'Local branches',
+  'branch.current': 'current',
+  'branch.checkout': 'Check out in this session',
+  'branch.makeWorktree': 'Open in a new worktree',
+  'branch.copy': 'Copy branch name',
+  'branch.delete': 'Delete branch…',
+  'branch.copied': 'Copied {name}',
+  'branch.more': 'Branch actions',
 };
 
 const zh = {
@@ -413,7 +492,48 @@ const zh = {
   'sidebar.branchTitle': '分支 {branch}',
   'sidebar.dirty': '{n} 个未提交',
   'sidebar.worktreeLine': 'Worktree {name} · {branch}',
-  'sidebar.branchLine': '分支 {branch}',
+  'view.worktree': '工作树',
+  'tab.repo': '仓库',
+  'tab.upstream': '上游',
+  'tab.dirty': '未提交',
+  'tab.worktrees': '工作树',
+  'tab.pool': '池目录',
+  'tab.graph': '提交图',
+  'tab.commits': '{n} 个提交',
+  'tab.lanes': '{n} 条泳道',
+  'tab.refresh': '刷新',
+  'tab.graphEmpty': '还没有提交。',
+  'tab.detached': '分离头指针',
+  'tab.statusCount': '{wt} 个工作树 / {br} 个本地分支',
+  'tab.hint': '↑↓ 选择 · Esc 逐层退出',
+  'tab.removeWt.body': '工作树目录会被删除，分支 {branch} 保留。',
+  'tab.delete.title': '删除分支 {branch}？',
+  'tab.delete.current': '该分支正被当前工作区检出。请先切换到其它分支。',
+  'tab.delete.occupied': '该分支在 {path} 中检出。请先移除那个工作树。',
+  'tab.delete.gotoWt': '去移除工作树',
+  'tab.delete.unmerged': '有 {n} 个提交尚未合并进 {trunk}。删除会丢弃它们，只能靠 reflog 找回。',
+  'tab.delete.upstream': '其上游',
+  'tab.delete.forceCheck': '我确认丢弃这些提交（-D）',
+  'tab.delete.force': '强制删除',
+  'tab.delete.done': '已删除 {branch}',
+  'detail.author': '作者',
+  'detail.parents': '{n} 个父提交',
+  'rack.title': '工作树机架',
+  'rack.poolCount': '{n} 池内',
+  'rack.main': '主检出',
+  'rack.clean': '干净',
+  'rack.dirtyN': '{n} 处改动',
+  'rack.enter': '进入会话',
+  'rack.remove': '移除',
+  'rack.create': '＋ 新建工作树',
+  'branches.local': '本地分支',
+  'branch.current': '当前',
+  'branch.checkout': '在当前会话检出',
+  'branch.makeWorktree': '在新工作树中打开',
+  'branch.copy': '复制分支名',
+  'branch.delete': '删除分支…',
+  'branch.copied': '已复制 {name}',
+  'branch.more': '分支操作',
 };
 //#endregion
 
@@ -554,6 +674,160 @@ const CSS = `
 .dsh-wt-hover .dsh-wt-hover-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-wt-hover .dsh-wt-hover-dirty{flex:none;color:var(--dsw-alias-state-warn-primary);font-size:10.5px}
 
+
+/* ---- 工作树 Tab（conversation.view）-------------------------------------
+   版式：读数带 / 提交图 | 机架 / 状态行。所有颜色走宿主令牌；泳道用四条
+   语义色循环（business/success/warn/混合紫），随主题自动翻转。 */
+.dsh-wt-tab{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px}
+.dsh-wt-tab-center{align-items:center;justify-content:center;gap:10px;color:var(--dsw-alias-label-secondary)}
+.dsh-wt-empty{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:12.5px;padding:28px 20px;text-align:center;max-width:460px;line-height:1.7}
+
+/* 读数带 */
+.dsh-wt-readout{flex:none;display:flex;align-items:stretch;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-wt-ro{padding:8px 16px 9px;border-right:1px solid var(--dsw-alias-border-l1);display:flex;flex-direction:column;gap:2px;justify-content:center;min-width:0}
+.dsh-wt-ro-cap{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:.13em;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));text-transform:uppercase;white-space:nowrap}
+.dsh-wt-ro-val{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.01em}
+.dsh-wt-ro-val[data-tone=warn]{color:var(--dsw-alias-state-warn-primary)}
+.dsh-wt-ro-grow{flex:1;border-right:none;align-items:flex-end}
+.dsh-wt-ro-grow .dsh-wt-ro-val{color:var(--dsw-alias-label-tertiary);font-size:11px}
+
+/* 主舞台 */
+.dsh-wt-stage{flex:1;min-height:0;display:flex}
+.dsh-wt-pane{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.dsh-wt-pane-head{flex:none;height:38px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-wt-pane-title{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
+.dsh-wt-pane-meta{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));display:flex}
+.dsh-wt-pane-meta span+span::before{content:"·";margin:0 8px;color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l1))}
+.dsh-wt-grow{flex:1}
+
+/* 提交图 */
+.dsh-wt-graph{position:relative;flex:1;min-height:0;overflow-y:auto;padding:6px 16px 10px 6px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l1)) transparent;background-image:repeating-linear-gradient(90deg,color-mix(in srgb,var(--dsw-alias-label-primary) 3%,transparent) 0 1px,transparent 1px 20px)}
+.dsh-wt-graph::-webkit-scrollbar{width:9px}
+.dsh-wt-graph::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:5px;border:2px solid transparent;background-clip:padding-box}
+.dsh-wt-graph-empty{display:flex;align-items:flex-start}
+.dsh-wt-crow{position:relative;display:flex;align-items:center;height:42px;border-radius:6px;cursor:pointer;transition:background .1s ease}
+.dsh-wt-crow:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 4%,transparent)}
+.dsh-wt-crow-sel{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent);box-shadow:inset 2px 0 0 var(--dsw-alias-state-business-primary)}
+.dsh-wt-crow-lane{flex:none;position:relative;height:42px}
+.dsh-wt-crow-lane svg{position:absolute;inset:0;overflow:visible}
+.dsh-wt-ln{stroke-width:1.5;stroke-opacity:.85}
+.dsh-wt-lane-0{stroke:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}
+.dsh-wt-lane-1{stroke:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}
+.dsh-wt-lane-2{stroke:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-primary)}
+.dsh-wt-lane-3{stroke:color-mix(in srgb,var(--dsw-alias-state-business-primary) 50%,var(--dsw-alias-state-error-primary));color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 50%,var(--dsw-alias-state-error-primary))}
+.dsh-wt-node{fill:currentColor;stroke:var(--dsw-alias-bg-base);stroke-width:3px}
+.dsh-wt-node-ring{position:absolute;top:21px;width:15px;height:15px;border:1px solid currentColor;border-radius:50%;opacity:.3;transform:translate(-50%,-50%)}
+.dsh-wt-node-ring[data-lane="0"]{color:var(--dsw-alias-state-business-primary)}
+.dsh-wt-node-ring[data-lane="1"]{color:var(--dsw-alias-state-success-primary)}
+.dsh-wt-node-ring[data-lane="2"]{color:var(--dsw-alias-state-warn-primary)}
+.dsh-wt-node-ring[data-lane="3"]{color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 50%,var(--dsw-alias-state-error-primary))}
+.dsh-wt-topic{display:flex;align-items:center;gap:8px;min-width:0;flex:1;padding-right:12px}
+.dsh-wt-subj{font-size:12.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.005em}
+.dsh-wt-crow-sel .dsh-wt-subj{color:var(--dsw-alias-label-primary)}
+.dsh-wt-ref{flex:none;display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:4px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10px;white-space:nowrap;color:var(--dsw-alias-label-tertiary);border:1px solid var(--dsw-alias-border-l1)}
+.dsh-wt-ref[data-kind=head]{color:var(--dsw-alias-state-business-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 35%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
+.dsh-wt-ref[data-kind=tag]{color:var(--dsw-alias-state-warn-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 32%,transparent)}
+.dsh-wt-ref[data-kind=remote]{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
+.dsh-wt-hash{flex:none;width:66px;text-align:right;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-variant-numeric:tabular-nums}
+.dsh-wt-when{flex:none;width:92px;text-align:right;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-variant-numeric:tabular-nums}
+
+/* 提交详情抽屉 */
+.dsh-wt-detail{flex:none;border-top:1px solid var(--dsw-alias-border-l1);padding:9px 16px 11px;background:color-mix(in srgb,var(--dsw-alias-label-primary) 2%,transparent)}
+.dsh-wt-detail-head{display:flex;align-items:center;gap:8px}
+.dsh-wt-detail-hash{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;color:var(--dsw-alias-state-business-primary);padding:1px 6px;border-radius:4px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
+.dsh-wt-detail-subj{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsh-wt-detail-meta{display:flex;gap:16px;margin-top:6px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
+
+/* 机架（右栏） */
+.dsh-wt-rail{width:308px;flex:none;border-left:1px solid var(--dsw-alias-border-l1);display:flex;flex-direction:column;min-height:0;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-base))}
+.dsh-wt-rail-head{flex:none;height:38px;display:flex;align-items:center;gap:8px;padding:0 12px 0 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.dsh-wt-rail-body{flex:1;overflow-y:auto;padding:2px 0 10px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l1)) transparent}
+.dsh-wt-rail-body::-webkit-scrollbar{width:9px}
+.dsh-wt-rail-body::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:5px;border:2px solid transparent;background-clip:padding-box}
+
+.dsh-wt-card{position:relative;margin:4px 8px;padding:9px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l1)}
+.dsh-wt-card-here{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 40%,transparent);box-shadow:inset 2px 0 0 var(--dsw-alias-state-business-primary)}
+.dsh-wt-card-top{display:flex;align-items:center;gap:7px;min-width:0}
+.dsh-wt-led{width:6px;height:6px;border-radius:50%;flex:none}
+.dsh-wt-led[data-tone=ok]{background:var(--dsw-alias-state-success-primary);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--dsw-alias-state-success-primary) 15%,transparent)}
+.dsh-wt-led[data-tone=dirty]{background:var(--dsw-alias-state-warn-primary);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--dsw-alias-state-warn-primary) 15%,transparent)}
+.dsh-wt-card-name{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsh-wt-card-tag{margin-left:auto;flex:none;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;letter-spacing:.04em;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));text-transform:uppercase}
+.dsh-wt-card-branch{margin-left:auto;flex:none;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;color:var(--dsw-alias-state-business-primary)}
+.dsh-wt-card-sub{display:flex;align-items:center;gap:8px;margin-top:3px;padding-left:13px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
+.dsh-wt-pin{color:var(--dsw-alias-state-business-primary)}
+.dsh-wt-card-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-wt-card-dirty[data-tone=warn]{color:var(--dsw-alias-state-warn-primary)}
+.dsh-wt-card-acts{display:flex;gap:4px;margin-top:7px;padding-left:13px}
+
+.dsh-wt-mini{height:21px;padding:0 8px;border-radius:5px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;transition:background .1s,color .1s,border-color .1s}
+.dsh-wt-mini:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent);color:var(--dsw-alias-label-primary)}
+.dsh-wt-mini:disabled{opacity:.5;cursor:default}
+.dsh-wt-mini-pri{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 32%,transparent);color:var(--dsw-alias-state-business-primary)}
+.dsh-wt-mini-pri:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 24%,transparent)}
+.dsh-wt-mini-danger{color:var(--dsw-alias-state-error-primary)}
+.dsh-wt-mini-danger:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 14%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,transparent)}
+
+/* 分支区 */
+.dsh-wt-sec{display:flex;align-items:center;gap:7px;padding:12px 14px 4px}
+.dsh-wt-sec-title{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
+.dsh-wt-sec-n{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;color:var(--dsw-alias-label-tertiary)}
+.dsh-wt-branch-wrap{position:relative}
+.dsh-wt-br{position:relative;display:flex;align-items:center;gap:7px;margin:1px 8px;padding:5px 8px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.dsh-wt-br:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 5%,transparent);color:var(--dsw-alias-label-primary)}
+.dsh-wt-br-icon{display:inline-flex;flex:none;opacity:.65;color:var(--dsw-alias-state-business-primary)}
+.dsh-wt-br-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-wt-br-cur .dsh-wt-br-name{color:var(--dsw-alias-label-primary);font-weight:600}
+.dsh-wt-br-cur .dsh-wt-br-icon{opacity:1}
+.dsh-wt-br-side{margin-left:auto;display:flex;gap:6px;align-items:center;font-size:9.5px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
+.dsh-wt-badge{font-size:9px;padding:1px 4px;border-radius:3px;color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 14%,transparent)}
+.dsh-wt-badge[data-tone=wt]{color:var(--dsw-alias-label-tertiary);background:color-mix(in srgb,var(--dsw-alias-label-primary) 7%,transparent)}
+.dsh-wt-more{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:13px;line-height:1;cursor:pointer;opacity:.55;transition:opacity .1s,background .1s,color .1s}
+.dsh-wt-br:hover .dsh-wt-more,.dsh-wt-more[aria-expanded=true]{opacity:1;color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}
+.dsh-wt-br-open{background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent);color:var(--dsw-alias-label-primary)}
+
+/* 弹出菜单 */
+.dsh-wt-menu{position:absolute;right:6px;top:calc(100% + 2px);z-index:30;min-width:196px;padding:4px;border-radius:9px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l1);box-shadow:0 2px 4px rgba(0,0,0,.3),0 14px 30px -10px rgba(0,0,0,.6);animation:dsh-wt-menu-in .12s cubic-bezier(.22,1,.36,1)}
+.dsh-wt-menu-up{top:auto;bottom:calc(100% + 2px)}
+@keyframes dsh-wt-menu-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.dsh-wt-menu-item{display:flex;align-items:center;gap:8px;width:100%;height:26px;padding:0 8px;border:none;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11.5px;font-family:inherit;text-align:left;cursor:pointer;white-space:nowrap}
+.dsh-wt-menu-item:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);color:var(--dsw-alias-label-primary)}
+.dsh-wt-menu-item:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-border-l2));cursor:default}
+.dsh-wt-menu-danger{color:var(--dsw-alias-state-error-primary)}
+.dsh-wt-menu-danger:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 14%,transparent);color:var(--dsw-alias-state-error-primary)}
+.dsh-wt-menu-sep{height:1px;border:none;margin:4px 6px;background:var(--dsw-alias-border-l1)}
+
+/* 状态化确认块（删除分支 / 移除工作树 / 脏切换） */
+.dsh-wt-cf{position:relative;z-index:2;margin:3px 8px 5px;padding:8px 9px;border-radius:8px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 8%,transparent);display:flex;flex-direction:column;gap:6px;animation:dsh-wt-menu-in .14s cubic-bezier(.22,1,.36,1)}
+.dsh-wt-cf[data-tone=error]{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent)}
+.dsh-wt-cf-title{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;line-height:16px;color:var(--dsw-alias-state-warn-primary)}
+.dsh-wt-cf[data-tone=error] .dsh-wt-cf-title{color:var(--dsw-alias-state-error-primary)}
+.dsh-wt-cf-body{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
+.dsh-wt-cf-acts{display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end;margin-top:1px}
+.dsh-wt-cf-check{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--dsw-alias-label-secondary);cursor:pointer;margin-right:auto}
+.dsh-wt-cf-check input{accent-color:var(--dsw-alias-state-error-primary);margin:0;width:12px;height:12px}
+
+/* 新建表单（三个退出点：✕ / 取消 / Esc） */
+.dsh-wt-create{margin:6px 8px 2px;padding:9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));display:flex;flex-direction:column;gap:6px}
+.dsh-wt-create-head{display:flex;align-items:center;gap:6px}
+.dsh-wt-create-title{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
+.dsh-wt-create-x{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:auto;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:12px;line-height:1;cursor:pointer}
+.dsh-wt-create-x:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);color:var(--dsw-alias-label-primary)}
+.dsh-wt-create-row{display:flex;gap:5px;align-items:center}
+.dsh-wt-create input,.dsh-wt-create select{flex:1;min-width:0;height:26px;padding:0 7px;border-radius:5px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;outline:none}
+.dsh-wt-create input:focus,.dsh-wt-create select:focus{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 60%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 16%,transparent)}
+.dsh-wt-create-foot{display:flex;align-items:center;gap:5px;margin-top:1px}
+.dsh-wt-create-hint{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dsh-wt-create-toggle{margin:4px 8px;height:32px;border:1px dashed var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11.5px;cursor:pointer}
+.dsh-wt-create-toggle:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 3%,transparent);color:var(--dsw-alias-label-primary)}
+
+/* 状态行 */
+.dsh-wt-tabbar{flex:none;height:27px;display:flex;align-items:center;gap:12px;padding:0 16px;border-top:1px solid var(--dsw-alias-border-l1);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;letter-spacing:.05em;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
+.dsh-wt-tabbar-note{max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-wt-tabbar-note[data-tone=error]{color:var(--dsw-alias-state-error-primary)}
+.dsh-wt-tabbar-note[data-tone=ok]{color:var(--dsw-alias-state-success-primary)}
+.dsh-wt-tabbar-hint{margin-left:auto;flex:none}
+
 @media (prefers-reduced-motion:reduce){
   .dsh-wt-panel,.dsh-wt-panel .dsh-wt-row,.dsh-wt-panel .dsh-wt-create-form{animation:none}
   .dsh-wt-trigger:active:not(:disabled),.dsh-wt-panel .dsh-wt-create-toggle:active:not(:disabled),.dsh-wt-panel .dsh-wt-button:active:not(:disabled){transform:none}
@@ -677,6 +951,151 @@ function FolderIcon(props) {
 }
 //#endregion
 
+//#region client/graph-layout.js
+/**
+ * Commit-graph lane layout.
+ *
+ * Turns a topologically ordered commit list into per-row drawing instructions,
+ * the same way `git log --graph` does it: a column is a *pending commit* that a
+ * line is still travelling towards. Nothing here knows about pixels — the SVG
+ * painter decides how a bend looks; this module only says which column a line
+ * occupies at the top and the bottom of each row.
+ *
+ * Why compute it here instead of drawing straight from parents: a row needs to
+ * know about lines that merely *pass through* it (other branches continuing
+ * below), which no single commit's parent list can tell you. Only the running
+ * column state can.
+ *
+ * @module dsh-worktree/client/graph-layout
+ */
+
+/**
+ * Lay out one page of commits.
+ *
+ * @param {Array<{ hash: string, parents: string[] }>} commits
+ *   commits in display order (newest first). Every parent that appears in the
+ *   list must come *after* its child. A parent that is *not* in the list keeps
+ *   its column open to the bottom edge — that is what a paged history looks
+ *   like, and the next page picks the line up again.
+ * @returns {Array<{
+ *   lane: number,
+ *   laneTop: boolean,
+ *   pass: number[],
+ *   incoming: number[],
+ *   outgoing: Array<{ lane: number, kind: 'continue' | 'branch' | 'merge' }>,
+ *   root: boolean,
+ * }>} one drawing instruction set per commit, in the same order.
+ */
+function layoutCommits(commits) {
+  /** Column state: the commit each column is still waiting for (`null` = free). */
+  const columns = [];
+  const rows = [];
+
+  for (const commit of commits) {
+    const before = columns.slice();
+
+    // Where does this commit sit? Either a column already waits for it, or it
+    // is a branch tip and takes the first free column.
+    let lane = columns.indexOf(commit.hash);
+    const incoming = [];
+    if (lane === -1) {
+      lane = columns.indexOf(null);
+      if (lane === -1) {
+        lane = columns.length;
+        columns.push(commit.hash);
+      } else {
+        columns[lane] = commit.hash;
+      }
+    } else {
+      // Two branches converge on the same commit: the extra columns bend into
+      // this node instead of continuing past it.
+      for (let index = 0; index < columns.length; index += 1) {
+        if (index !== lane && columns[index] === commit.hash) {
+          incoming.push(index);
+          columns[index] = null;
+        }
+      }
+    }
+
+    // Columns that merely cross this row.
+    const pass = [];
+    for (let index = 0; index < columns.length; index += 1) {
+      if (index === lane || incoming.includes(index)) continue;
+      if (columns[index] !== null) pass.push(index);
+    }
+
+    // Where does the line leave the node?
+    const outgoing = [];
+    if (commit.parents.length > 0) {
+      for (let index = 0; index < commit.parents.length; index += 1) {
+        const parent = commit.parents[index];
+        // A parent may already be awaited by another column (a merge whose
+        // second parent is an older branch still open below): bend towards it
+        // instead of opening a duplicate column for the same commit.
+        let waitingAt = -1;
+        for (let column = 0; column < columns.length; column += 1) {
+          if (column !== lane && columns[column] === parent) waitingAt = column;
+        }
+        if (waitingAt !== -1) {
+          if (index === 0) columns[lane] = null;
+          outgoing.push({ lane: waitingAt, kind: 'merge' });
+          continue;
+        }
+        if (index === 0) {
+          columns[lane] = parent;
+          outgoing.push({ lane, kind: 'continue' });
+        } else {
+          let free = columns.indexOf(null);
+          if (free === -1) {
+            free = columns.length;
+            columns.push(parent);
+          } else {
+            columns[free] = parent;
+          }
+          outgoing.push({ lane: free, kind: 'branch' });
+        }
+      }
+    } else {
+      columns[lane] = null;
+    }
+
+    const laneTop = before[lane] !== null && before[lane] !== undefined;
+    // An incoming column only bends in if it actually carried a line on the
+    // previous row; a freshly created column has nothing above it.
+    const incomingTop = incoming.filter((index) => before[index] !== null && before[index] !== undefined);
+
+    while (columns.length > 0 && columns[columns.length - 1] === null) columns.pop();
+
+    rows.push({
+      lane,
+      laneTop,
+      pass,
+      incoming: incomingTop,
+      outgoing,
+      root: commit.parents.length === 0,
+    });
+  }
+
+  return rows;
+}
+
+/**
+ * Columns a page needs, so the painter can size its gutter.
+ * @param {ReturnType<typeof layoutCommits>} rows - laid-out page.
+ * @returns {number} column count, at least 1.
+ */
+function countLanes(rows) {
+  let max = 1;
+  for (const row of rows) {
+    max = Math.max(max, row.lane + 1);
+    for (const lane of row.pass) max = Math.max(max, lane + 1);
+    for (const lane of row.incoming) max = Math.max(max, lane + 1);
+    for (const edge of row.outgoing) max = Math.max(max, edge.lane + 1);
+  }
+  return max;
+}
+//#endregion
+
 //#region client/api.js
 /**
  * Client-side API over the mounted `worktree` Remote namespace, plus the
@@ -771,6 +1190,12 @@ function createWorktreeApi(ctx) {
 
     /** Remove one pool worktree. */
     removeWorktree: (request) => call('removeWorktree', request),
+
+    /** One page of commits with parents and refs, for the graph view. */
+    log: (request) => call('log', request),
+
+    /** Delete one local branch with structured refusal states. */
+    deleteBranch: (request) => call('deleteBranch', request),
 
     /**
      * Open a session whose working directory is one worktree checkout.
@@ -1982,6 +2407,779 @@ function CreateFooter({ status, busy, mode, setMode, createBranch, createWorktre
 }
 //#endregion
 
+//#region client/view.js
+/**
+ * The worktree tab: one full `conversation.view` page that turns the picker's
+ * facts into a managing surface — a readout band, the commit graph drawn from
+ * the DAG the Host reports, and a rack of checkouts with branch actions.
+ *
+ * Every lane, bend, and badge is derived: `layoutCommits` turns parent lists
+ * into drawing instructions, so nothing here is hand-placed. Destructive
+ * actions follow the picker's state discipline — the Host's refusal names the
+ * next step, and the confirm block is that answer rendered in place.
+ * @module dsh-worktree/client/view
+ */
+
+
+
+
+
+/** Graph geometry: lane pitch, gutter inset, row height, node centre. */
+const LANE_W = 20;
+const LANE_X0 = 16;
+const ROW_H = 42;
+const NODE_Y = 21;
+const PAGE_LIMIT = 200;
+
+const tabLaneX = (lane) => LANE_X0 + lane * LANE_W;
+const tabLaneClass = (lane) => 'dsh-wt-ln dsh-wt-lane-' + (lane % 4);
+const tabBaseName = (path) => {
+  const text = String(path ?? '').replace(/[\\/]+$/, '');
+  const slash = Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\'));
+  return slash < 0 ? text : text.slice(slash + 1);
+};
+
+/** Shared relative-time formatter; the active locale decides the wording. */
+const tabRelative = (at) => {
+  if (typeof at !== 'number' || at <= 0) return '';
+  const deltaSeconds = Math.round(at - Date.now() / 1000);
+  const divide = [[60, 'second'], [60, 'minute'], [24, 'hour'], [7, 'day'], [4.348, 'week'], [12, 'month'], [Number.POSITIVE_INFINITY, 'year']];
+  let value = deltaSeconds;
+  let unit = 'second';
+  for (const [step, nextUnit] of divide) {
+    if (Math.abs(value) < step) break;
+    value = Math.round(value / step * 10) / 10;
+    unit = nextUnit;
+  }
+  try {
+    return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(value, unit);
+  } catch {
+    return new Date(at * 1000).toLocaleDateString();
+  }
+};
+
+/**
+ * The worktree tab view.
+ * @param {object} props - session identity, the API bundle, and the locale seat.
+ * @returns the tab page, or a pending / not-a-repository notice.
+ */
+function WorktreeView({ sessionId, worktree, t }) {
+  const api = worktree?.api;
+  const store = worktree?.store;
+  const [status, setStatus] = useState(undefined);
+  const [page, setPage] = useState(undefined);
+  const [loading, setLoading] = useState(true);
+  const [logLoading, setLogLoading] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [selected, setSelected] = useState(-1);
+  const [menuBranch, setMenuBranch] = useState(null);
+  const [confirmState, setConfirmState] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createBase, setCreateBase] = useState('HEAD');
+  const railRef = useRef(null);
+  const graphRef = useRef(null);
+
+  const say = useCallback((message) => {
+    setToast(message);
+    window.clearTimeout(say.timer);
+    say.timer = window.setTimeout(() => { setToast(null); }, 2600);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (sessionId === undefined || api === undefined) return;
+    setLoading(true);
+    try {
+      const value = await api.status(sessionId);
+      if (value.ok === false && value.code === 'session-unavailable') {
+        setStatus(undefined);
+        for (const delay of [400, 800, 1600]) {
+          await new Promise((resolve) => { setTimeout(resolve, delay); });
+          const retry = await api.status(sessionId);
+          if (retry.ok === true) { setStatus(retry); break; }
+        }
+      } else {
+        setStatus(value);
+      }
+    } catch {
+      setStatus(undefined);
+    } finally {
+      setLoading(false);
+    }
+  }, [api, sessionId]);
+
+  const refreshLog = useCallback(async () => {
+    if (sessionId === undefined || api === undefined) return;
+    setLogLoading(true);
+    try {
+      const value = await api.log({ sessionId, limit: PAGE_LIMIT });
+      if (value.ok === true) setPage(value);
+    } catch {
+      /* The graph stays on its last page; the readout still answers. */
+    } finally {
+      setLogLoading(false);
+    }
+  }, [api, sessionId]);
+
+  useEffect(() => {
+    void refresh();
+    void refreshLog();
+  }, [refresh, refreshLog]);
+
+  // The store is the shared source of truth: the picker moving this session (or
+  // any mutation elsewhere) republishes, and the tab follows without polling.
+  useEffect(() => {
+    if (sessionId === undefined || store === undefined) return undefined;
+    return store.subscribe(() => {
+      const fresh = store.currentSessionOf(sessionId);
+      if (fresh !== undefined) setStatus(fresh);
+    });
+  }, [store, sessionId]);
+
+  const afterMutation = useCallback((message) => {
+    if (store !== undefined) store.invalidate();
+    if (typeof message === 'string') say(message);
+    void refresh();
+    void refreshLog();
+  }, [store, refresh, refreshLog, say]);
+
+  // --- derived model -------------------------------------------------------
+
+  const rows = useMemo(() => {
+    if (page?.commits?.length > 0 !== true) return [];
+    return layoutCommits(page.commits).map((row, index) => ({ ...row, commit: page.commits[index] }));
+  }, [page]);
+  const lanes = useMemo(() => countLanes(rows), [rows]);
+  const laneWidth = LANE_X0 * 2 + Math.max(1, lanes - 1) * LANE_W + 18;
+
+  const localBranches = useMemo(() => (status?.branches ?? []).filter((branch) => branch.kind === 'local'), [status]);
+  const worktreeByBranch = useMemo(() => {
+    const map = new Map();
+    for (const entry of status?.worktrees ?? []) {
+      if (entry.branch != null) map.set(entry.branch, entry);
+    }
+    return map;
+  }, [status]);
+  const poolWorktrees = useMemo(() => (status?.worktrees ?? []).filter((entry) => entry.inPool), [status]);
+  const currentWorktree = useMemo(() => (status?.worktrees ?? []).find((entry) => entry.isCurrent === true) ?? null, [status]);
+
+  // --- actions -------------------------------------------------------------
+
+  const switchTo = useCallback(async (branch, allowDirty = false) => {
+    setBusy({ kind: 'switch', branch });
+    setMenuBranch(null);
+    setConfirmState(null);
+    try {
+      const value = await api.switchBranch({ sessionId, branch, ...(allowDirty ? { allowDirty: true } : {}) });
+      if (value.ok === true) {
+        afterMutation(value.mode === 'created-tracking'
+          ? t('hint.trackingCreated', { branch: value.branch, upstream: value.upstream ?? branch })
+          : t('hint.switchDone', { branch: value.branch }));
+      } else if (value.code === 'dirty-tree') {
+        setConfirmState({ kind: 'dirty-switch', branch: value.branch ?? branch, count: value.dirtyCount ?? 0 });
+      } else if (value.code === 'branch-occupied') {
+        setConfirmState({ kind: 'occupied-switch', branch: value.branch ?? branch, path: value.occupiedPath });
+      } else {
+        setNotice({ message: value.message ?? t('error.switchFailed') });
+      }
+    } catch (cause) {
+      setNotice({ message: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setBusy(null);
+    }
+  }, [api, sessionId, afterMutation, t]);
+
+  const runDelete = useCallback(async (branch, force = false) => {
+    // 菜单必须先收：确认块会插到行下方，留着菜单正好压在它上面。
+    setMenuBranch(null);
+    setBusy({ kind: 'delete', branch });
+    try {
+      const value = await api.deleteBranch({ sessionId, branch, ...(force ? { force: true } : {}) });
+      if (value.ok === true) {
+        setConfirmState(null);
+        setMenuBranch(null);
+        afterMutation(t('tab.delete.done', { branch }));
+      } else if (value.code === 'unmerged') {
+        setConfirmState({ kind: 'delete-unmerged', branch, trunk: value.trunk ?? null, unmerged: value.unmerged ?? null, force: false });
+      } else if (value.code === 'current-branch' || value.code === 'branch-occupied') {
+        setConfirmState({ kind: 'delete-occupied', branch, ...(value.occupiedPath === undefined ? {} : { path: value.occupiedPath }), current: value.code === 'current-branch' });
+      } else {
+        setConfirmState({ kind: 'delete-failed', branch, message: value.message, detail: value.detail });
+      }
+      // 确认块插在行下方，可能落在可视区外：滚到最近位置让用户看见。
+      requestAnimationFrame(() => {
+        railRef.current?.querySelector('.dsh-wt-cf')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+    } catch (cause) {
+      setConfirmState({ kind: 'delete-failed', branch, message: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setBusy(null);
+    }
+  }, [api, sessionId, afterMutation, t]);
+
+  const removeWorktree = useCallback(async (path, force = false) => {
+    setBusy({ kind: 'remove', path });
+    try {
+      const value = await api.removeWorktree({ sessionId, path, ...(force ? { force: true } : {}) });
+      if (value.ok === true) {
+        setConfirmState(null);
+        afterMutation(t('hint.removed', { name: tabBaseName(path) }));
+      } else if (value.code === 'dirty-worktree') {
+        setConfirmState({ kind: 'remove-wt', path, dirtyCount: value.dirtyCount ?? 0, force: false });
+      } else {
+        setNotice({ message: value.message ?? t('error.removeFailed') });
+      }
+    } catch (cause) {
+      setNotice({ message: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setBusy(null);
+    }
+  }, [api, sessionId, afterMutation, t]);
+
+  const openSessionIn = useCallback(async (path) => {
+    setBusy({ kind: 'open', path });
+    try {
+      const opened = await api.openSessionInDirectory(path, api.workspaceOf(status?.cwd ?? ''));
+      if (typeof opened === 'string' && store !== undefined) store.invalidateSession(opened);
+      say(t('hint.sessionOpened', { name: tabBaseName(path) }));
+    } catch (cause) {
+      setNotice({ message: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setBusy(null);
+    }
+  }, [api, status, store, say, t]);
+
+  const submitCreate = useCallback(async () => {
+    const name = createName.trim();
+    if (name.length === 0) return;
+    setBusy({ kind: 'worktree', name });
+    try {
+      const value = await api.createWorktree({ sessionId, name, ...(createBase === 'HEAD' ? {} : { startPoint: createBase }) });
+      if (value.ok !== true) {
+        setNotice({ message: value.message ?? t('error.createFailed') });
+        return;
+      }
+      const opened = await api.openSessionInDirectory(value.path, api.workspaceOf(status?.cwd ?? ''));
+      if (typeof opened === 'string' && store !== undefined) store.invalidateSession(opened);
+      setCreateOpen(false);
+      setCreateName('');
+      afterMutation(t('create.worktreeOk', { branch: value.branch, path: value.path }));
+    } catch (cause) {
+      setNotice({ message: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setBusy(null);
+    }
+  }, [api, sessionId, createName, createBase, status, store, afterMutation, t]);
+
+  const copyName = useCallback(async (name) => {
+    setMenuBranch(null);
+    try {
+      await navigator.clipboard.writeText(name);
+      say(t('tab.branch.copied', { name }));
+    } catch {
+      /* Clipboard may be denied; the toast is a courtesy, not a contract. */
+    }
+  }, [say, t]);
+
+  const closeCreate = useCallback(() => {
+    setCreateOpen(false);
+  }, []);
+
+  // Esc peels one layer at a time: menu, confirm, create form, detail.
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        if (menuBranch !== null) { setMenuBranch(null); return; }
+        if (confirmState !== null) { setConfirmState(null); return; }
+        if (createOpen) { closeCreate(); return; }
+        if (selected >= 0) setSelected(-1);
+        return;
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      if (event.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target.tagName)) return;
+      if (rows.length === 0) return;
+      event.preventDefault();
+      setSelected((current) => {
+        const next = current + (event.key === 'ArrowDown' ? 1 : -1);
+        return next < 0 ? rows.length - 1 : next >= rows.length ? 0 : next;
+      });
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); };
+  }, [menuBranch, confirmState, createOpen, selected, rows.length, closeCreate]);
+
+  // Clicking anything outside the open menu closes it.
+  useEffect(() => {
+    if (menuBranch === null) return undefined;
+    const onPointerDown = (event) => {
+      if (event.target instanceof HTMLElement && railRef.current?.contains(event.target) === true) return;
+      setMenuBranch(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => { document.removeEventListener('pointerdown', onPointerDown, true); };
+  }, [menuBranch]);
+
+  // --- guards --------------------------------------------------------------
+
+  if (api === undefined) return null;
+  if (loading === true && status === undefined) {
+    return jsx('div', { className: 'dsh-wt-tab dsh-wt-tab-center', children: jsx(SpinnerIcon, { size: 16 }) });
+  }
+  if (status?.isRepo !== true) {
+    return jsx('div', {
+      className: 'dsh-wt-tab dsh-wt-tab-center',
+      'data-testid': 'dsh-worktree-tab-empty',
+      children: jsx('span', { className: 'dsh-wt-empty', children: status?.code === 'recorded-checkout-missing'
+        ? t('panel.checkoutMissing', { path: status?.path ?? '' })
+        : (loading === true ? t('panel.sessionPending') : t('panel.notRepo')) }),
+    });
+  }
+
+  // --- readout band --------------------------------------------------------
+
+  const dirtyCount = status.dirtyCount;
+  const readout = jsxs('div', { className: 'dsh-wt-readout', children: [
+    jsx('div', { className: 'dsh-wt-ro', children: [
+      jsx('span', { className: 'dsh-wt-ro-cap', children: t('tab.repo') }),
+      jsx('span', { className: 'dsh-wt-ro-val', children: tabBaseName(status.repositoryRoot) }),
+    ] }),
+    jsx('div', { className: 'dsh-wt-ro', children: [
+      jsx('span', { className: 'dsh-wt-ro-cap', children: 'HEAD' }),
+      jsx('span', { className: 'dsh-wt-ro-val', children: (status.head ?? '').slice(0, 7) + (status.branch != null ? ' · ' + status.branch : '') }),
+    ] }),
+    jsx('div', { className: 'dsh-wt-ro', children: [
+      jsx('span', { className: 'dsh-wt-ro-cap', children: t('tab.upstream') }),
+      jsx('span', { className: 'dsh-wt-ro-val', children: status.upstream != null
+        ? status.upstream + (status.ahead > 0 ? ' ↑' + status.ahead : '') + (status.behind > 0 ? ' ↓' + status.behind : '')
+        : t('status.noUpstream') }),
+    ] }),
+    jsx('div', { className: 'dsh-wt-ro', children: [
+      jsx('span', { className: 'dsh-wt-ro-cap', children: t('tab.dirty') }),
+      jsx('span', { className: 'dsh-wt-ro-val', 'data-tone': dirtyCount > 0 ? 'warn' : undefined, children: dirtyCount == null ? '—' : t('status.dirty', { n: String(dirtyCount) }) }),
+    ] }),
+    jsx('div', { className: 'dsh-wt-ro', children: [
+      jsx('span', { className: 'dsh-wt-ro-cap', children: t('tab.worktrees') }),
+      jsx('span', { className: 'dsh-wt-ro-val', children: String(poolWorktrees.length) + ' + 1' }),
+    ] }),
+    jsx('div', { className: 'dsh-wt-ro dsh-wt-ro-grow', children: [
+      jsx('span', { className: 'dsh-wt-ro-cap', children: t('tab.pool') }),
+      jsx('span', { className: 'dsh-wt-ro-val', children: status.poolPath }),
+    ] }),
+  ] });
+
+  // --- commit graph --------------------------------------------------------
+
+  const rowSvg = (row) => {
+    const parts = [];
+    for (const lane of row.pass) {
+      parts.push(jsx('line', { x1: tabLaneX(lane), y1: 0, x2: tabLaneX(lane), y2: ROW_H, className: tabLaneClass(lane) }, 'p' + lane));
+    }
+    for (const lane of row.incoming) {
+      parts.push(jsx('path', { d: tabElbow(lane, row.lane, 0, NODE_Y - 5), className: tabLaneClass(lane), fill: 'none' }, 'i' + lane));
+    }
+    if (row.laneTop === true) {
+      parts.push(jsx('line', { x1: tabLaneX(row.lane), y1: 0, x2: tabLaneX(row.lane), y2: NODE_Y - 5, className: tabLaneClass(row.lane) }, 't'));
+    }
+    row.outgoing.forEach((edge, index) => {
+      if (edge.kind === 'continue') {
+        parts.push(jsx('line', { x1: tabLaneX(edge.lane), y1: NODE_Y + 4, x2: tabLaneX(edge.lane), y2: ROW_H, className: tabLaneClass(edge.lane) }, 'o' + index));
+      } else {
+        parts.push(jsx('path', { d: tabElbow(row.lane, edge.lane, NODE_Y + 4, ROW_H), className: tabLaneClass(edge.lane), fill: 'none' }, 'o' + index));
+      }
+    });
+    // The commit node itself: a lane-coloured dot with a page-background halo,
+    // so passing lines appear to pass *behind* it instead of through it.
+    parts.push(jsx('circle', {
+      cx: tabLaneX(row.lane),
+      cy: NODE_Y,
+      r: row.commit.head === true ? 4.4 : 3.4,
+      className: tabLaneClass(row.lane) + ' dsh-wt-node',
+    }, 'node'));
+    return parts;
+  };
+
+  const graphChildren = [];
+  rows.forEach((row, index) => {
+    const commit = row.commit;
+    const isSelected = index === selected;
+    graphChildren.push(jsxs('div', {
+      className: 'dsh-wt-crow' + (isSelected ? ' dsh-wt-crow-sel' : ''),
+      role: 'button',
+      tabIndex: -1,
+      onClick: () => { setSelected(index === selected ? -1 : index); },
+      children: [
+        jsxs('div', { className: 'dsh-wt-crow-lane', style: { width: laneWidth + 'px' }, children: [
+          jsx('svg', { width: laneWidth, height: ROW_H, 'aria-hidden': true, children: rowSvg(row) }),
+          commit.head === true && jsx('span', { className: 'dsh-wt-node-ring', style: { left: tabLaneX(row.lane) + 'px' }, 'data-lane': row.lane % 4 }),
+        ] }),
+        jsxs('div', { className: 'dsh-wt-topic', children: [
+          jsx('span', { className: 'dsh-wt-subj', children: commit.subject }),
+          commit.refs.map((ref, refIndex) => jsx('span', {
+            className: 'dsh-wt-ref',
+            'data-kind': ref.kind,
+            children: ref.kind === 'head' ? (ref.name == null ? 'HEAD' : 'HEAD → ' + ref.name) : ref.name,
+          }, refIndex)),
+          jsx('span', { className: 'dsh-wt-hash', children: commit.short }),
+        ] }),
+        jsx('span', { className: 'dsh-wt-when', children: tabRelative(commit.at) }),
+      ],
+    }, commit.hash));
+  });
+
+  const graph = jsxs('div', { className: 'dsh-wt-pane', children: [
+    jsxs('div', { className: 'dsh-wt-pane-head', children: [
+      jsx('span', { className: 'dsh-wt-pane-title', children: t('tab.graph') }),
+      jsxs('span', { className: 'dsh-wt-pane-meta', children: [
+        jsx('span', { children: t('tab.commits', { n: String(page?.total ?? rows.length) }) }),
+        jsx('span', { children: t('tab.lanes', { n: String(lanes) }) }),
+      ] }),
+      jsx('span', { className: 'dsh-wt-grow' }),
+      logLoading === true && jsx(SpinnerIcon, { size: 13 }),
+      jsx('button', {
+        type: 'button',
+        className: 'dsh-wt-mini',
+        onClick: () => { void refreshLog(); },
+        children: t('tab.refresh'),
+      }),
+    ] }),
+    rows.length === 0
+      ? jsx('div', { className: 'dsh-wt-graph dsh-wt-graph-empty', children: jsx('span', { className: 'dsh-wt-empty', children: t('tab.graphEmpty') }) })
+      : jsx('div', { className: 'dsh-wt-graph', ref: graphRef, children: graphChildren }),
+    selected >= 0 && rows[selected] !== undefined && jsxs('div', { className: 'dsh-wt-detail', 'data-testid': 'dsh-worktree-commit-detail', children: [
+      jsxs('div', { className: 'dsh-wt-detail-head', children: [
+        jsx('span', { className: 'dsh-wt-detail-hash', children: rows[selected].commit.short }),
+        jsx('span', { className: 'dsh-wt-detail-subj', children: rows[selected].commit.subject }),
+      ] }),
+      jsxs('div', { className: 'dsh-wt-detail-meta', children: [
+        jsx('span', { children: t('detail.author') + ' ' + rows[selected].commit.author }),
+        jsx('span', { children: tabRelative(rows[selected].commit.at) }),
+        jsx('span', { children: t('detail.parents', { n: String(rows[selected].commit.parents.length) }) }),
+      ] }),
+    ] }),
+  ] });
+
+  // --- rack ----------------------------------------------------------------
+
+  const rackCards = [];
+  if (currentWorktree !== null) {
+    rackCards.push(jsxs('div', {
+      className: 'dsh-wt-card' + (currentWorktree.isCurrent === true ? ' dsh-wt-card-here' : ''),
+      'data-testid': 'dsh-worktree-rack-main',
+      children: [
+        jsxs('div', { className: 'dsh-wt-card-top', children: [
+          jsx('span', { className: 'dsh-wt-led', 'data-tone': (currentWorktree.dirtyCount ?? 0) > 0 ? 'dirty' : 'ok' }),
+          jsx('span', { className: 'dsh-wt-card-name', children: currentWorktree.branch ?? t('tab.detached') }),
+          jsx('span', { className: 'dsh-wt-card-tag', children: t('rack.main') }),
+        ] }),
+        jsxs('div', { className: 'dsh-wt-card-sub', children: [
+          jsx('span', { className: 'dsh-wt-pin', children: '◆' }),
+          jsx('span', { className: 'dsh-wt-card-path', children: currentWorktree.path }),
+          jsx('span', { className: 'dsh-wt-card-dirty', 'data-tone': (currentWorktree.dirtyCount ?? 0) > 0 ? 'warn' : undefined, children: currentWorktree.dirtyCount == null ? '' : ((currentWorktree.dirtyCount > 0 ? t('rack.dirtyN', { n: String(currentWorktree.dirtyCount) }) : t('rack.clean'))) }),
+        ] }),
+      ],
+    }, 'main'));
+  }
+  for (const entry of poolWorktrees) {
+    rackCards.push(jsxs('div', {
+      className: 'dsh-wt-card',
+      'data-testid': 'dsh-worktree-rack-entry',
+      children: [
+        jsxs('div', { className: 'dsh-wt-card-top', children: [
+          jsx('span', { className: 'dsh-wt-led', 'data-tone': (entry.dirtyCount ?? 0) > 0 ? 'dirty' : 'ok' }),
+          jsx('span', { className: 'dsh-wt-card-name', children: entry.name }),
+          jsx('span', { className: 'dsh-wt-card-branch', children: entry.branch ?? t('tab.detached') }),
+        ] }),
+        jsx('div', { className: 'dsh-wt-card-sub', children: jsx('span', { className: 'dsh-wt-card-path', children: entry.path }) }),
+        jsxs('div', { className: 'dsh-wt-card-acts', children: [
+          jsx('button', {
+            type: 'button',
+            className: 'dsh-wt-mini dsh-wt-mini-pri',
+            disabled: busy !== null,
+            onClick: () => { void openSessionIn(entry.path); },
+            children: busy?.kind === 'open' && busy.path === entry.path ? t('action.opening') : t('rack.enter'),
+          }),
+          jsx('button', {
+            type: 'button',
+            className: 'dsh-wt-mini',
+            disabled: busy !== null,
+            'aria-haspopup': 'dialog',
+            onClick: () => { setConfirmState({ kind: 'remove-wt', path: entry.path, dirtyCount: entry.dirtyCount ?? 0, force: false }); },
+            children: busy?.kind === 'remove' && busy.path === entry.path ? t('action.removing') : t('rack.remove'),
+          }),
+        ] }),
+        confirmState?.kind === 'remove-wt' && confirmState.path === entry.path && jsxs('div', {
+          className: 'dsh-wt-cf',
+          'data-tone': confirmState.dirtyCount > 0 ? 'error' : 'warn',
+          'data-testid': 'dsh-worktree-confirm-remove',
+          children: [
+            jsxs('span', { className: 'dsh-wt-cf-title', children: [jsx(WarningIcon, { size: 13 }), t('confirm.remove.title')] }),
+            jsx('span', { className: 'dsh-wt-cf-body', children: confirmState.dirtyCount > 0
+              ? t('confirm.remove.body', { name: entry.name })
+              : t('tab.removeWt.body', { branch: entry.branch ?? '' }) }),
+            jsxs('div', { className: 'dsh-wt-cf-acts', children: [
+              jsx('button', { type: 'button', className: 'dsh-wt-mini', onClick: () => { setConfirmState(null); }, children: t('error.cancel') }),
+              jsx('button', {
+                type: 'button',
+                className: 'dsh-wt-mini dsh-wt-mini-danger',
+                disabled: busy !== null,
+                onClick: () => { void removeWorktree(entry.path, confirmState.dirtyCount > 0); },
+                children: t('confirm.remove.proceed'),
+              }),
+            ] }),
+          ],
+        }),
+      ],
+    }, entry.path));
+  }
+
+  const branchRows = localBranches.map((branch, index) => {
+    const holder = worktreeByBranch.get(branch.name) ?? null;
+    const menuOpen = menuBranch === branch.name;
+    const openUp = index >= localBranches.length - 2;
+    return jsxs('div', { className: 'dsh-wt-branch-wrap', key: branch.name, children: [
+      jsxs('div', {
+        className: 'dsh-wt-br' + (branch.current === true ? ' dsh-wt-br-cur' : '') + (menuOpen ? ' dsh-wt-br-open' : ''),
+        children: [
+          jsx('span', { className: 'dsh-wt-br-icon', children: branch.current === true ? jsx(BranchIcon, { size: 12 }) : jsx(BranchIcon, { size: 12, style: { opacity: 0.7 } }) }),
+          jsx('span', { className: 'dsh-wt-br-name', children: branch.name }),
+          jsxs('span', { className: 'dsh-wt-br-side', children: [
+            branch.current === true && jsx('span', { className: 'dsh-wt-badge', children: t('branch.current') }),
+            holder !== null && jsx('span', { className: 'dsh-wt-badge', 'data-tone': 'wt', children: holder.name }),
+          ] }),
+          jsx('button', {
+            type: 'button',
+            className: 'dsh-wt-more',
+            'aria-haspopup': 'menu',
+            'aria-expanded': menuOpen,
+            'aria-label': t('branch.more'),
+            onClick: () => { setMenuBranch(menuOpen ? null : branch.name); setConfirmState(null); },
+            children: '⋯',
+          }),
+          menuOpen === true && jsxs('div', {
+            className: 'dsh-wt-menu' + (openUp ? ' dsh-wt-menu-up' : ''),
+            role: 'menu',
+            children: [
+              jsx('button', {
+                type: 'button',
+                className: 'dsh-wt-menu-item',
+                role: 'menuitem',
+                disabled: branch.current === true || holder !== null,
+                onClick: () => { void switchTo(branch.name); },
+                children: t('branch.checkout'),
+              }),
+              jsx('button', {
+                type: 'button',
+                className: 'dsh-wt-menu-item',
+                role: 'menuitem',
+                disabled: holder !== null,
+                onClick: () => { setMenuBranch(null); setCreateOpen(true); setCreateName(branch.name); setCreateBase('HEAD'); },
+                children: t('branch.makeWorktree'),
+              }),
+              jsx('button', {
+                type: 'button',
+                className: 'dsh-wt-menu-item',
+                role: 'menuitem',
+                onClick: () => { void copyName(branch.name); },
+                children: t('branch.copy'),
+              }),
+              jsx('hr', { className: 'dsh-wt-menu-sep' }),
+              jsx('button', {
+                type: 'button',
+                className: 'dsh-wt-menu-item dsh-wt-menu-danger',
+                role: 'menuitem',
+                onClick: () => { void runDelete(branch.name); },
+                children: t('branch.delete'),
+              }),
+            ],
+          }),
+        ],
+      }),
+      confirmState !== null && confirmState.branch === branch.name && confirmDeleteBlock(),
+    ] });
+  });
+
+  function confirmDeleteBlock() {
+    const state = confirmState;
+    if (state.kind === 'delete-occupied') {
+      return jsxs('div', { className: 'dsh-wt-cf', 'data-tone': 'error', 'data-testid': 'dsh-worktree-confirm-delete-occupied', children: [
+        jsxs('span', { className: 'dsh-wt-cf-title', children: [jsx(WarningIcon, { size: 13 }), t('tab.delete.title', { branch: state.branch })] }),
+        jsx('span', { className: 'dsh-wt-cf-body', children: state.current === true
+          ? t('tab.delete.current')
+          : t('tab.delete.occupied', { path: state.path ?? '' }) }),
+        jsxs('div', { className: 'dsh-wt-cf-acts', children: [
+          state.current !== true && jsx('button', {
+            type: 'button',
+            className: 'dsh-wt-mini',
+            onClick: () => {
+              setConfirmState(null);
+              const target = poolWorktrees.find((entry) => entry.branch === state.branch);
+              if (target !== undefined) void removeWorktree(target.path);
+            },
+            children: t('tab.delete.gotoWt'),
+          }),
+          jsx('button', { type: 'button', className: 'dsh-wt-mini', onClick: () => { setConfirmState(null); }, children: t('error.cancel') }),
+        ] }),
+      ] });
+    }
+    if (state.kind === 'delete-unmerged') {
+      return jsxs('div', { className: 'dsh-wt-cf', 'data-tone': 'warn', 'data-testid': 'dsh-worktree-confirm-delete-unmerged', children: [
+        jsxs('span', { className: 'dsh-wt-cf-title', children: [jsx(WarningIcon, { size: 13 }), t('tab.delete.title', { branch: state.branch })] }),
+        jsx('span', { className: 'dsh-wt-cf-body', children: t('tab.delete.unmerged', { n: String(state.unmerged ?? '?'), trunk: state.trunk ?? t('tab.delete.upstream') }) }),
+        jsxs('label', { className: 'dsh-wt-cf-check', children: [
+          jsx('input', {
+            type: 'checkbox',
+            checked: state.force === true,
+            onChange: (event) => { setConfirmState({ ...state, force: event.target.checked }); },
+          }),
+          t('tab.delete.forceCheck'),
+        ] }),
+        jsxs('div', { className: 'dsh-wt-cf-acts', children: [
+          jsx('button', { type: 'button', className: 'dsh-wt-mini', onClick: () => { setConfirmState(null); }, children: t('error.cancel') }),
+          jsx('button', {
+            type: 'button',
+            className: 'dsh-wt-mini dsh-wt-mini-danger',
+            disabled: state.force !== true || busy !== null,
+            onClick: () => { void runDelete(state.branch, true); },
+            children: busy?.kind === 'delete' ? t('action.removing') : t('tab.delete.force'),
+          }),
+        ] }),
+      ] });
+    }
+    if (state.kind === 'delete-failed') {
+      return jsxs('div', { className: 'dsh-wt-cf', 'data-tone': 'error', children: [
+        jsxs('span', { className: 'dsh-wt-cf-title', children: [jsx(WarningIcon, { size: 13 }), t('error.removeFailed')] }),
+        jsx('span', { className: 'dsh-wt-cf-body', children: state.message ?? t('error.unexpected') }),
+        jsx('div', { className: 'dsh-wt-cf-acts', children: [
+          jsx('button', { type: 'button', className: 'dsh-wt-mini', onClick: () => { setConfirmState(null); }, children: t('error.cancel') }),
+        ] }),
+      ] });
+    }
+    return null;
+  }
+
+  const rail = jsxs('aside', { className: 'dsh-wt-rail', ref: railRef, children: [
+    jsxs('div', { className: 'dsh-wt-rail-head', children: [
+      jsx('span', { className: 'dsh-wt-pane-title', children: t('rack.title') }),
+      jsx('span', { className: 'dsh-wt-pane-meta', children: jsx('span', { children: t('rack.poolCount', { n: String(poolWorktrees.length) }) }) }),
+      jsx('span', { className: 'dsh-wt-grow' }),
+      jsx('button', {
+        type: 'button',
+        className: 'dsh-wt-mini',
+        onClick: () => { setCreateOpen(!createOpen); setConfirmState(null); },
+        children: t('create.worktreeAction'),
+      }),
+    ] }),
+    jsxs('div', { className: 'dsh-wt-rail-body', children: [
+      rackCards,
+      createOpen === false
+        ? jsx('button', {
+            type: 'button',
+            className: 'dsh-wt-create-toggle',
+            onClick: () => { setCreateOpen(true); },
+            children: t('rack.create'),
+          })
+        : jsxs('div', { className: 'dsh-wt-create', 'data-testid': 'dsh-worktree-create-form', children: [
+            jsxs('div', { className: 'dsh-wt-create-head', children: [
+              jsx('span', { className: 'dsh-wt-create-title', children: t('create.worktreeTitle') }),
+              jsx('button', {
+                type: 'button',
+                className: 'dsh-wt-create-x',
+                'aria-label': t('error.cancel'),
+                onClick: closeCreate,
+                children: '✕',
+              }),
+            ] }),
+            jsx('div', { className: 'dsh-wt-create-row', children: jsx('input', {
+              type: 'text',
+              value: createName,
+              placeholder: t('create.namePlaceholder'),
+              'aria-label': t('create.namePlaceholder'),
+              spellCheck: false,
+              onChange: (event) => { setCreateName(event.target.value); },
+              onKeyDown: (event) => { if (event.key === 'Enter') void submitCreate(); },
+            }) }),
+            jsx('div', { className: 'dsh-wt-create-row', children: jsxs('select', {
+              value: createBase,
+              'aria-label': t('create.from'),
+              onChange: (event) => { setCreateBase(event.target.value); },
+              children: [
+                jsx('option', { value: 'HEAD', children: t('create.fromHead') }),
+                status.trunkBranch != null && jsx('option', { value: status.trunkBranch, children: status.trunkBranch }),
+                ...localBranches.filter((branch) => branch.name !== status.trunkBranch && branch.current !== true)
+                  .map((branch) => jsx('option', { value: branch.name, children: branch.name }, branch.name)),
+              ],
+            }) }),
+            jsxs('div', { className: 'dsh-wt-create-foot', children: [
+              jsx('span', { className: 'dsh-wt-create-hint', children: status.poolPath }),
+              jsx('span', { className: 'dsh-wt-grow' }),
+              jsx('button', { type: 'button', className: 'dsh-wt-mini', onClick: closeCreate, children: t('error.cancel') }),
+              jsx('button', {
+                type: 'button',
+                className: 'dsh-wt-mini dsh-wt-mini-pri',
+                disabled: createName.trim().length === 0 || busy !== null,
+                onClick: () => { void submitCreate(); },
+                children: busy?.kind === 'worktree' ? t('create.creating') : t('create.worktreeSubmit'),
+              }),
+            ] }),
+          ] }),
+      jsxs('div', { className: 'dsh-wt-sec', children: [
+        jsx('span', { className: 'dsh-wt-sec-title', children: t('branches.local') }),
+        jsx('span', { className: 'dsh-wt-sec-n', children: String(localBranches.length) }),
+      ] }),
+      branchRows,
+      confirmState?.kind === 'dirty-switch' && jsxs('div', { className: 'dsh-wt-cf', 'data-tone': 'warn', 'data-testid': 'dsh-worktree-confirm-dirty', children: [
+        jsxs('span', { className: 'dsh-wt-cf-title', children: [jsx(WarningIcon, { size: 13 }), t('confirm.dirty.title')] }),
+        jsx('span', { className: 'dsh-wt-cf-body', children: t('confirm.dirty.body', { n: String(confirmState.count) }) }),
+        jsxs('div', { className: 'dsh-wt-cf-acts', children: [
+          jsx('button', { type: 'button', className: 'dsh-wt-mini', onClick: () => { setConfirmState(null); }, children: t('error.cancel') }),
+          jsx('button', { type: 'button', className: 'dsh-wt-mini dsh-wt-mini-danger', onClick: () => { void switchTo(confirmState.branch, true); }, children: t('confirm.dirty.proceed') }),
+        ] }),
+      ] }),
+      confirmState?.kind === 'occupied-switch' && jsxs('div', { className: 'dsh-wt-cf', 'data-tone': 'error', children: [
+        jsxs('span', { className: 'dsh-wt-cf-title', children: [jsx(WarningIcon, { size: 13 }), t('confirm.occupied.title')] }),
+        jsx('span', { className: 'dsh-wt-cf-body', children: t('confirm.occupied.body', { branch: confirmState.branch, name: tabBaseName(confirmState.path ?? '') }) }),
+        jsxs('div', { className: 'dsh-wt-cf-acts', children: [
+          jsx('button', { type: 'button', className: 'dsh-wt-mini', onClick: () => { setConfirmState(null); }, children: t('error.cancel') }),
+          jsx('button', { type: 'button', className: 'dsh-wt-mini dsh-wt-mini-pri', onClick: () => { void openSessionIn(confirmState.path); }, children: t('confirm.occupied.open') }),
+        ] }),
+      ] }),
+    ] }),
+  ] });
+
+  // --- page ----------------------------------------------------------------
+
+  return jsxs('div', {
+    className: 'dsh-wt-tab',
+    'data-testid': 'dsh-worktree-tab',
+    children: [
+      readout,
+      jsxs('div', { className: 'dsh-wt-stage', children: [graph, rail] }),
+      jsxs('div', { className: 'dsh-wt-tabbar', children: [
+        jsx('span', { children: t('tab.statusCount', { wt: String(status.worktrees.length), br: String(localBranches.length) }) }),
+        jsx('span', { className: 'dsh-wt-grow' }),
+        notice !== null && jsx('span', { className: 'dsh-wt-tabbar-note', 'data-tone': 'error', children: notice.message }),
+        toast !== null && jsx('span', { className: 'dsh-wt-tabbar-note', 'data-tone': 'ok', children: toast }),
+        jsx('span', { className: 'dsh-wt-tabbar-hint', children: t('tab.hint') }),
+      ] }),
+    ],
+  });
+}
+
+/**
+ * One lane bend between two rows: a cubic whose control points keep the turn
+ * within one lane width, so a crossing reads as a deliberate elbow.
+ */
+function tabElbow(fromLane, toLane, fromY, toY) {
+  const x0 = tabLaneX(fromLane);
+  const x1 = tabLaneX(toLane);
+  const dy = toY - fromY;
+  const k = Math.min(dy * 0.5, Math.abs(x1 - x0) * 1.15);
+  return 'M' + x0 + ' ' + fromY + ' C ' + x0 + ' ' + (fromY + k) + ', ' + x1 + ' ' + (toY - k) + ', ' + x1 + ' ' + toY;
+}
+//#endregion
+
 //#region client/decor.js
 /**
  * Sidebar and session-header decorations: a leading worktree/branch mark on
@@ -2094,7 +3292,9 @@ function SessionHoverInfo({ sessionId, worktree, useSessions, t }) {
 //#region client/entry.js
 /**
  * Client entry: mounts the shared Remote contract, registers dictionaries,
- * styles, and the four UI seats. Inlined into the built factory file.
+ * styles, and the five UI seats — the worktree tab first: it is the plugin's
+ * only full-page surface, riding the host's native conversation-view slot
+ * beside Chat and Trajectory. Inlined into the built factory file.
  * @module dsh-worktree/client/entry
  */
 
@@ -2136,6 +3336,19 @@ async function applyInner(ctx) {
   ctx.effect(() => () => {
     store.dispose();
   }, 'dsh-worktree: git info store');
+
+  // Registration-time tab text reads through the bound translate as a thunk,
+  // so the label follows the active locale without re-registration.
+  const t = ctx.locale.bind('worktree');
+
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+    name: 'conversation.view',
+    id: 'worktree',
+    order: 20,
+    locale: 'worktree',
+    label: () => t('view.worktree'),
+    inject: (sessionId) => ({ sessionId, worktree: bundle }),
+  }, WorktreeView));
 
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',

@@ -1,6 +1,8 @@
 /**
  * Client entry: mounts the shared Remote contract, registers dictionaries,
- * styles, and the four UI seats. Inlined into the built factory file.
+ * styles, and the five UI seats — the worktree tab first: it is the plugin's
+ * only full-page surface, riding the host's native conversation-view slot
+ * beside Chat and Trajectory. Inlined into the built factory file.
  * @module dsh-worktree/client/entry
  */
 
@@ -42,6 +44,19 @@ async function applyInner(ctx) {
   ctx.effect(() => () => {
     store.dispose();
   }, 'dsh-worktree: git info store');
+
+  // Registration-time tab text reads through the bound translate as a thunk,
+  // so the label follows the active locale without re-registration.
+  const t = ctx.locale.bind('worktree');
+
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+    name: 'conversation.view',
+    id: 'worktree',
+    order: 20,
+    locale: 'worktree',
+    label: () => t('view.worktree'),
+    inject: (sessionId) => ({ sessionId, worktree: bundle }),
+  }, WorktreeView));
 
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',

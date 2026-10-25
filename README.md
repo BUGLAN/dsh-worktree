@@ -11,13 +11,21 @@ DeepSeek Harness (DSH) 插件：把 DSH 内置的 Git worktree 能力完整呈�
   - 本地分支 / 远程分支切换（远程分支自动创建本地跟踪分支）
   - **创建并检出新分支**：在池内创建 worktree，可選擇在新会话中打开（并行任务）或当前会话进入
   - 状态化确认流：未提交更改、分支被其他 worktree 占用、移除脏 worktree 等，均给出下一步操作
+- **「工作树」Tab**（`conversation.view`，第三个原生 Tab）：完整管理页
+  - 读数带：仓库 / HEAD / 上游 ↑↓ / 未提交 / 工作树数 / 池目录
+  - 提交图：`git log --all --date-order` 的 DAG 由泳道算法（`client/graph-layout.js`）实时布线，节点/分叉/汇入全部推导而非手绘；HEAD 行有环标记，点行展开详情
+  - 工作树机架：主检出 + 池内工作树卡（LED 脏/净、进入会话、移除含脏树 --force 确认）
+  - 分支列表：每行常驻 `⋯` 菜单（检出 / 建工作树 / 复制名 / 删除分支），删除走状态化确认（当前分支 / 被工作树占用 / 未合并需勾选 -D）
+  - 新建工作树表单：三个退出点（✕ / 取消 / Esc 逐层退出），取消保留已输入
 - **侧边栏会话行**（`sidebar.session.row.leading` / `.hover`）：worktree 会话显示专用图标与名称（悬停卡片含分支与路径）
 - **会话头部**（`conversation.session.header.utilities`）：分支 / worktree 标记 chip（极简模式下随宿主隐藏该区域，输入框入口始终可见）
 
 ## 结构
 
 ```
-index.js            Host 半：git 运行器 + WorktreeService（6 个远程方法）
+index.js            Host 半：git 运行器 + WorktreeService（8 个远程方法）
+client/graph-layout.js 提交图泳道布局（纯函数，git log --graph 同款算法）
+client/view.js      工作树 Tab 视图（读数带 + 提交图 + 机架）
 contract.js         双半共享的远程描述符与 wire 类型
 client.js           构建产物（模块加载器工厂格式，勿手改）
 client/             客户端源码（panel/decor/api/icons/locales/styles/entry）

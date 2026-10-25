@@ -32,11 +32,17 @@
  *                       repositoryRoot?, upstream? }
  *   EnterWorktreeValue  { ok, code?, message?, hint?, cwd? }
  *   RemoveWorktreeValue { ok, code?, message?, hint?, removed?, path? }
+ *   LogValue           { ok, sessionId, repositoryRoot, limit, skip, hasMore, total?,
+ *                        commits: [{ hash, short, parents, subject, author, at,
+ *                                    head, refs: [{ name, kind }] }] }
+ *   DeleteBranchValue  { ok, code?, message?, hint?, branch?, trunk?, unmerged?,
+ *                        occupiedPath?, mode?, forced? }
  *
  * Failure codes the UI branches on:
  *   not-a-repo, session-unavailable, invalid-name, branch-not-found,
  *   branch-exists, branch-occupied, dirty-tree, switch-conflict, switch-failed,
- *   path-exists, create-failed, remove-failed, dirty-worktree, not-a-directory.
+ *   path-exists, create-failed, remove-failed, dirty-worktree, not-a-directory,
+ *   current-branch, unmerged, delete-failed.
  * @module dsh-worktree/contract
  */
 
@@ -160,6 +166,34 @@ function parseRemoveRequest(value) {
   };
 }
 
+/** `request: { sessionId, limit?, skip? }` — one page of commits for the graph. */
+function parseLogRequest(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const readCount = (raw, field) => {
+    if (raw === undefined || raw === null) return undefined;
+    if (!Number.isSafeInteger(raw)) throw new Error(field + ' must be an integer');
+    return raw;
+  };
+  const limit = readCount(value.limit, 'request.limit');
+  const skip = readCount(value.skip, 'request.skip');
+  return {
+    sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
+    ...(limit === undefined ? {} : { limit }),
+    ...(skip === undefined ? {} : { skip }),
+  };
+}
+
+/** `request: { sessionId, branch, force? }` — delete one local branch. */
+function parseDeleteBranchRequest(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
+  const force = optionalBoolean(value.force, 'request.force');
+  return {
+    sessionId: nonEmptyString(value.sessionId, 'request.sessionId'),
+    branch: nonEmptyString(value.branch, 'request.branch'),
+    ...(force === undefined ? {} : { force }),
+  };
+}
+
 /** One direct Remote invocation descriptor. */
 function method(name, parameter, result, optionalSignal = true) {
   return Object.freeze({
@@ -200,6 +234,10 @@ export const DESCRIPTORS = Object.freeze([
     resultCodec('EnterWorktreeValue', 'committed working directory after the move, or a structured failure')),
   method('removeWorktree', param('request', parseRemoveRequest, 'session, pool worktree path, and force consent'),
     resultCodec('RemoveWorktreeValue', 'removal outcome or a structured state that needs a user decision')),
+  method('log', param('request', parseLogRequest, 'session, page size, and offset into the date-ordered stream'),
+    resultCodec('LogValue', 'one page of commits with parents and refs, plus whether an older page exists')),
+  method('deleteBranch', param('request', parseDeleteBranchRequest, 'session, branch, and force consent'),
+    resultCodec('DeleteBranchValue', 'deletion outcome or a structured state that needs a user decision')),
 ]);
 
 /** The Client contribution mounted through `ctx.remote.$mount`. */

@@ -92,6 +92,12 @@ export function createWorktreeApi(ctx) {
     /** Remove one pool worktree. */
     removeWorktree: (request) => call('removeWorktree', request),
 
+    /** One page of commits with parents and refs, for the graph view. */
+    log: (request) => call('log', request),
+
+    /** Delete one local branch with structured refusal states. */
+    deleteBranch: (request) => call('deleteBranch', request),
+
     /**
      * Open a session whose working directory is one worktree checkout.
      *

@@ -391,6 +391,47 @@ try {
   value = await service.switchBranch({ sessionId: 's3', branch: 'main' });
   check('switch: non-repo mapped', value.ok === false && value.code === 'not-a-repo');
 
+  // --- log: the graph's data source ---------------------------------------
+  await git(repo, 'tag', 'v-test');
+  value = await service.log({ sessionId: 's1', limit: 50 });
+  check('log: page reported', value.ok === true && Array.isArray(value.commits) && value.commits.length >= 2, JSON.stringify(value.commits?.length));
+  check('log: hasMore false under a wide limit', value.hasMore === false);
+  check('log: total counted', typeof value.total === 'number' && value.total >= value.commits.length);
+  const first = value.commits[0];
+  check('log: newest first is HEAD', first.head === true && first.refs.some((ref) => ref.kind === 'head'));
+  check('log: tag decoration classified', value.commits.some((c) => c.refs.some((ref) => ref.kind === 'tag' && ref.name === 'v-test')), JSON.stringify(first.refs));
+  check('log: local branch decoration classified', value.commits.some((c) => c.refs.some((ref) => ref.kind === 'local')));
+  check('log: parents travel with commits', first.parents.length >= 1 && first.parents[0] === value.commits[1]?.hash);
+  check('log: short hash is 7 chars', first.short.length === 7 && first.hash.startsWith(first.short));
+  check('log: author and timestamp present', first.author.length > 0 && first.at > 0);
+  const paged = await service.log({ sessionId: 's1', limit: 1 });
+  check('log: narrow page reports hasMore', paged.ok === true && paged.commits.length === 1 && paged.hasMore === true);
+  const skipped = await service.log({ sessionId: 's1', limit: 1, skip: 1 });
+  check('log: skip walks the stream', skipped.ok === true && skipped.commits[0]?.hash !== paged.commits[0]?.hash);
+  const cachedCalls = gitCalls;
+  await service.log({ sessionId: 's1', limit: 50 });
+  check('log: repeat page costs no git', gitCalls === cachedCalls);
+  value = await service.log({ sessionId: 's3', limit: 10 });
+  check('log: non-repo mapped', value.ok === false && value.code === 'not-a-repo');
+
+  // --- deleteBranch: state machine ------------------------------------------
+  value = await service.deleteBranch({ sessionId: 's1', branch: 'remote-only' });
+  check('delete: current branch refused', value.ok === false && value.code === 'current-branch', JSON.stringify(value).slice(0, 120));
+  value = await service.deleteBranch({ sessionId: 's1', branch: 'no-such' });
+  check('delete: unknown branch mapped', value.ok === false && value.code === 'branch-not-found');
+  await git(repo, 'switch', '-c', 'unmerged-x');
+  await writeFile(join(repo, 'e.txt'), 'five\n');
+  await git(repo, 'add', '.');
+  await git(repo, 'commit', '-m', 'e');
+  await git(repo, 'switch', 'remote-only');
+  value = await service.deleteBranch({ sessionId: 's1', branch: 'unmerged-x' });
+  check('delete: unmerged needs consent', value.ok === false && value.code === 'unmerged' && value.trunk === 'main', JSON.stringify(value).slice(0, 160));
+  check('delete: unmerged count reported', value.unmerged === 2, String(value.unmerged)); // c + e sit ahead of main
+  value = await service.deleteBranch({ sessionId: 's1', branch: 'unmerged-x', force: true });
+  check('delete: forced ok', value.ok === true && value.forced === true);
+  value = await service.deleteBranch({ sessionId: 's1', branch: 'task-1' });
+  check('delete: merged branch deleted', value.ok === true && value.forced === false, JSON.stringify(value).slice(0, 120));
+
   service.dispose();
   console.log(failures === 0 ? '\nSMOKE OK' : `\nSMOKE FAILED (${String(failures)} checks)`);
 } finally {
