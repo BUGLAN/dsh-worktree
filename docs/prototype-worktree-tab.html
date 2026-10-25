@@ -1,0 +1,1079 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>工作树 Tab · 视觉原型</title>
+<script>
+(function () {
+  try {
+    var p = new URLSearchParams(location.search);
+    if (p.get('theme') === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    document.documentElement.classList.add('preload');
+  } catch (e) {}
+})();
+</script>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%}
+html{color-scheme:dark}
+html[data-theme=light]{color-scheme:light}
+body{margin:0;background:var(--s-page);color:var(--ink);font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+
+/* 色板：暗色取宿主 ui-theme 真值；亮色按同一语义层级推导 */
+:root{
+  --s-page:#151517;--s-rail:#17171a;--s-card:#1e1f22;--s-card-hi:#232427;--s-input:#141416;
+  --s-detail:#1c1d1f;--s-status:#131315;--s-band-a:#191a1c;--s-band-b:#161618;--s-readout:#191a1c;
+  --hair:rgba(255,255,255,.06);--hair2:rgba(255,255,255,.11);--hair3:rgba(255,255,255,.16);
+  --grid:rgba(255,255,255,.028);--grid2:rgba(255,255,255,.02);
+  --ink:#f9fafb;--ink2:#cfd3d6;--ink3:#adb2b8;--dim:#82868c;--dim2:#4a4c52;
+  --blue:#7aaaff;--green:#4ed17e;--amber:#f7ad31;--red:#f25a5a;--teal:#5fd3c4;--violet:#b49cff;
+  --on-blue:#0b1220;--halo:#151517;
+  --mono:"Cascadia Mono","SF Mono",Consolas,"Microsoft YaHei",monospace;
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+html[data-theme=light]{
+  --s-page:#ffffff;--s-rail:#fafbfc;--s-card:#ffffff;--s-card-hi:#f4f6f9;--s-input:#ffffff;
+  --s-detail:#fbfcfd;--s-status:#f7f8fa;--s-band-a:#fdfdfe;--s-band-b:#fafbfc;--s-readout:#fcfcfd;
+  --hair:rgba(15,17,21,.08);--hair2:rgba(15,17,21,.14);--hair3:rgba(15,17,21,.2);
+  --grid:rgba(15,17,21,.05);--grid2:rgba(15,17,21,.035);
+  --ink:#0f1115;--ink2:#3f444b;--ink3:#61666b;--dim:#81858c;--dim2:#c7ccd3;
+  --blue:#4176e6;--green:#1a9e5c;--amber:#b4750a;--red:#d43b3b;--teal:#199a8b;--violet:#7a5cf0;
+  --halo:#ffffff;
+}
+
+.app{display:flex;height:100%;font-size:13px;line-height:1.4}
+
+/* ---------- 侧栏：只提供语境 ---------- */
+.sidebar{width:246px;flex:none;border-right:.5px solid var(--hair);background:var(--s-rail);display:flex;flex-direction:column;padding:14px 0 10px}
+.sb-brand{display:flex;align-items:center;gap:8px;padding:0 14px 14px;font-weight:600;font-size:12.5px}
+.sb-mark{width:18px;height:18px;border-radius:5px;background:linear-gradient(140deg,#7aaaff,#3d6fd4);display:grid;place-items:center;font-size:10px;color:#0b1220;font-weight:800}
+.sb-label{padding:10px 14px 4px;font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;color:var(--dim);text-transform:uppercase}
+.sb-row{display:flex;align-items:center;gap:8px;padding:7px 14px;color:var(--ink3);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-row.on{background:var(--s-card-hi);color:var(--ink);box-shadow:inset 2px 0 0 var(--blue)}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:var(--dim2);flex:none}
+.sb-row.on .sb-dot{background:var(--blue)}
+.sb-spacer{flex:1}
+
+/* ---------- 会话头：几何/字号与宿主 ConversationRoot 对齐 ---------- */
+.main{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;background:var(--s-page)}
+.chead{flex:none;padding:10px 28px 0 20px;border-bottom:.5px solid var(--hair3)}
+.title-row{display:flex;align-items:center;gap:10px;min-height:30px}
+.title{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px}
+.chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;background:var(--s-card-hi);border:.5px solid var(--hair);color:var(--ink3);font-size:11.5px}
+.row-fill{flex:1}
+.util{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;color:var(--ink3);border:none;background:transparent;cursor:pointer;font-size:15px;line-height:1}
+.util:hover{background:var(--s-card-hi);color:var(--ink)}
+.tabs{display:flex;gap:36px;margin-top:10px;padding-left:8px;position:relative;z-index:1}
+.tab{position:relative;padding:0 0 9px;border:none;background:transparent;font:500 13px/16px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--ink3);cursor:pointer;transition:color .12s var(--ease)}
+.tab:hover{color:var(--ink2)}
+.tab::after{content:"";position:absolute;right:0;bottom:-1px;left:0;height:2px;border-radius:2px;background:transparent;transition:background .12s var(--ease)}
+.tab.on{color:var(--blue)}
+.tab.on::after{background:var(--blue)}
+.tab .tab-count{margin-left:6px;font-family:var(--mono);font-size:9.5px;color:var(--dim);vertical-align:1px}
+.tab.on .tab-count{color:var(--blue);opacity:.75}
+
+/* ---------- 视图壳 ---------- */
+.views{flex:1;min-height:0;display:flex;flex-direction:column}
+.view{display:none;flex:1;min-height:0;flex-direction:column}
+.view.on{display:flex}
+.ghost{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--dim);font-size:12.5px}
+.ghost .sk{height:9px;border-radius:5px;background:var(--hair)}
+.ghost .sk.s1{width:min(520px,70%)}
+.ghost .sk.s2{width:min(360px,48%)}
+.ghost .sk.s3{width:min(440px,60%)}
+
+/* ---------- 读数带 ---------- */
+.readout{flex:none;display:flex;align-items:stretch;border-bottom:.5px solid var(--hair);background:linear-gradient(180deg,var(--s-band-a),var(--s-band-b))}
+.ro-cell{padding:8px 16px 9px;border-right:.5px solid var(--hair);min-width:0;display:flex;flex-direction:column;gap:2px;justify-content:center}
+.ro-cap{font-family:var(--mono);font-size:9px;letter-spacing:.13em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
+.ro-val{font-family:var(--mono);font-size:12.5px;white-space:nowrap;display:flex;align-items:center;gap:6px;letter-spacing:-.01em}
+.ro-val .u{color:var(--dim);font-size:10.5px}
+.ro-val.sans{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;font-weight:500}
+.ro-grow{flex:1;border-right:none;align-items:flex-end}
+.ro-grow .ro-val{color:var(--ink3);font-size:11px}
+.led-dot{width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 7px rgba(78,209,126,.6);flex:none}
+.delta{font-family:var(--mono);font-size:11px}
+.delta.up{color:var(--green)}.delta.down{color:var(--amber)}
+.spark{display:flex;align-items:flex-end;gap:2px;height:20px}
+.spark i{width:3px;border-radius:1px;background:color-mix(in srgb,var(--blue) 30%,transparent)}
+.spark i.hot{background:var(--blue)}
+
+/* ---------- 主舞台 ---------- */
+.stage{flex:1;min-height:0;display:flex}
+.pane{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;overflow:hidden}
+.pane-head{flex:none;height:38px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:.5px solid var(--hair)}
+.pane-title{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);display:flex;align-items:center;gap:7px}
+.pane-title b{color:var(--ink);font-weight:600}
+.pane-meta{font-family:var(--mono);font-size:10.5px;color:var(--dim);display:flex;gap:0}
+.pane-meta span+span::before{content:"·";margin:0 8px;color:var(--dim2)}
+.grow{flex:1}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:24px;padding:0 8px;border:.5px solid var(--hair);border-radius:6px;background:transparent;color:var(--ink3);font-size:11.5px;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+.iconbtn:hover{background:var(--s-card-hi);color:var(--ink);border-color:var(--hair2)}
+.iconbtn svg{opacity:.8}
+
+/* ---------- 提交图 ---------- */
+.graph{position:relative;flex:1;min-height:0;overflow-y:auto;padding:6px 16px 10px 6px;scrollbar-width:thin;scrollbar-color:var(--hair3) transparent}
+.graph::-webkit-scrollbar{width:9px}
+.graph::-webkit-scrollbar-thumb{background:var(--hair3);border-radius:5px;border:2px solid transparent;background-clip:padding-box}
+.graph::-webkit-scrollbar-track{background:transparent}
+.graph::before{content:"";position:absolute;inset:0;pointer-events:none;background-image:repeating-linear-gradient(90deg,var(--grid) 0 1px,transparent 1px 20px),repeating-linear-gradient(180deg,var(--grid2) 0 1px,transparent 1px 42px);-webkit-mask-image:linear-gradient(90deg,black,transparent 300px);mask-image:linear-gradient(90deg,black,transparent 300px)}
+.graph-fade{position:absolute;left:0;right:0;bottom:0;height:46px;pointer-events:none;z-index:2;background:linear-gradient(180deg,transparent,var(--s-page) 82%);opacity:0;transition:opacity .18s}
+.pane[data-scrollable="true"] .graph-fade{opacity:1}
+.crow{position:relative;display:flex;align-items:center;height:42px;border-radius:6px;cursor:pointer;transition:background .1s var(--ease)}
+.crow:hover{background:color-mix(in srgb,var(--ink) 4%,transparent)}
+.crow.sel{background:color-mix(in srgb,var(--blue) 9%,transparent);box-shadow:inset 2px 0 0 var(--blue)}
+.crow .lane{flex:none;width:98px;height:42px;position:relative}
+.crow .lane svg{position:absolute;inset:0;overflow:visible}
+.node-ring{position:absolute;width:15px;height:15px;border:1px solid currentColor;border-radius:50%;opacity:.3;transform:translate(-50%,-50%)}
+.crow.sel .node-ring{opacity:.5}
+.topic{display:flex;align-items:center;gap:8px;min-width:0;flex:1;padding-right:12px}
+.subj{font-size:12.5px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.005em}
+.crow.sel .subj{color:var(--ink)}
+.hash{flex:none;width:64px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+.when{flex:none;width:92px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+.ref{flex:none;display:inline-flex;align-items:center;gap:4px;height:17px;padding:0 6px;border-radius:4px;font-family:var(--mono);font-size:10px;white-space:nowrap}
+.ref.head{background:color-mix(in srgb,var(--blue) 18%,transparent);color:var(--blue);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blue) 32%,transparent)}
+.ref.outline{border:.5px solid var(--hair2);color:var(--ink3)}
+.ref.teal{color:var(--teal);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--teal) 32%,transparent)}
+.ref.violet{color:var(--violet);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--violet) 32%,transparent)}
+.ref.tag{color:var(--amber);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--amber) 30%,transparent)}
+
+/* ---------- 工作区改动 ---------- */
+.worktree-changes{flex:none;border-top:.5px solid var(--hair);padding:8px 16px 10px;background:color-mix(in srgb,var(--ink) 1.6%,transparent)}
+.wc-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.wc-title{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
+.wc-count{font-family:var(--mono);font-size:10px;color:var(--amber)}
+.chg{display:flex;align-items:center;gap:9px;height:24px;border-radius:5px;padding:0 6px;font-family:var(--mono);font-size:11.5px}
+.chg:hover{background:color-mix(in srgb,var(--ink) 4%,transparent)}
+.st{width:14px;text-align:center;font-size:10px;font-weight:700}
+.st.m{color:var(--amber)}.st.a{color:var(--green)}.st.d{color:var(--red)}
+.chg .p{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink3)}
+.chg .plus{color:var(--green);font-size:10.5px}
+.chg .minus{color:var(--red);font-size:10.5px}
+
+/* ---------- 提交详情 ---------- */
+.detail{flex:none;max-height:0;overflow:hidden;background:var(--s-detail);border-top:.5px solid transparent;transition:max-height .24s var(--ease),border-color .2s}
+.detail.on{max-height:126px;border-top-color:var(--hair2);box-shadow:0 -12px 30px -16px rgba(0,0,0,.6)}
+.detail-inner{padding:10px 16px 12px}
+.d-head{display:flex;align-items:center;gap:8px}
+.d-hash{font-family:var(--mono);font-size:11.5px;color:var(--blue);padding:1px 6px;border-radius:4px;background:color-mix(in srgb,var(--blue) 12%,transparent)}
+.d-subj{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-meta{display:flex;gap:16px;margin-top:7px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.d-meta b{color:var(--ink3);font-weight:500;margin-right:5px}
+.d-bar{display:flex;gap:2px;margin-top:9px;height:5px;border-radius:3px;overflow:hidden;width:240px}
+.d-bar i{display:block;height:100%}
+.d-bar .add{background:color-mix(in srgb,var(--green) 78%,transparent)}
+.d-bar .del{background:color-mix(in srgb,var(--red) 72%,transparent)}
+.d-bar .rest{background:var(--hair)}
+
+/* ---------- 右栏机架 ---------- */
+.rail{width:308px;flex:none;border-left:.5px solid var(--hair);display:flex;flex-direction:column;min-height:0;background:var(--s-rail)}
+.rail-head{flex:none;height:38px;display:flex;align-items:center;gap:8px;padding:0 12px 0 14px;border-bottom:.5px solid var(--hair)}
+.rail-body{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--hair3) transparent;padding-bottom:8px}
+.rail-body::-webkit-scrollbar{width:9px}
+.rail-body::-webkit-scrollbar-thumb{background:var(--hair3);border-radius:5px;border:2px solid transparent;background-clip:padding-box}
+.sec-head{display:flex;align-items:center;gap:7px;padding:11px 14px 4px;font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim)}
+.sec-head::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--hair),transparent)}
+.sec-head .n{letter-spacing:.04em;color:var(--ink3)}
+.wt{position:relative;margin:4px 8px;padding:9px 9px 9px 10px;border-radius:8px;background:var(--s-card);border:.5px solid var(--hair);cursor:pointer;transition:background .12s,border-color .12s}
+.wt:hover{background:var(--s-card-hi);border-color:var(--hair2)}
+.wt.sel{background:var(--s-card-hi);border-color:color-mix(in srgb,var(--blue) 45%,transparent);box-shadow:inset 2px 0 0 var(--blue)}
+.wt.ghostcard{background:transparent;border:1px dashed var(--hair3);color:var(--ink3);display:flex;align-items:center;justify-content:center;gap:6px;height:34px;font-size:11.5px}
+.wt.ghostcard:hover{background:color-mix(in srgb,var(--ink) 3%,transparent);color:var(--ink);border-color:var(--dim)}
+.wt-top{display:flex;align-items:center;gap:7px}
+.slot{flex:none;width:16px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--dim)}
+.led{width:6px;height:6px;border-radius:50%;flex:none}
+.led.ok{background:var(--green);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--green) 14%,transparent),0 0 8px color-mix(in srgb,var(--green) 55%,transparent)}
+.led.dirty{background:var(--amber);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--amber) 14%,transparent),0 0 8px color-mix(in srgb,var(--amber) 55%,transparent)}
+.wt-name{font-family:var(--mono);font-size:12px;letter-spacing:-.01em}
+.wt-branch{font-family:var(--mono);font-size:10.5px;margin-left:auto;max-width:128px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--violet)}
+.wt-branch.t{color:var(--teal)}
+.wt-sub{display:flex;align-items:center;gap:8px;margin-top:3px;padding-left:23px;font-family:var(--mono);font-size:10px;color:var(--dim)}
+.wt-sub .path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.wt-sub .pin{color:var(--blue)}
+.wt-sub .dirty-n{color:var(--amber)}
+.wt-acts{display:flex;gap:4px;margin-top:0;padding-left:23px;max-height:0;overflow:hidden;opacity:0;transition:max-height .18s var(--ease),opacity .18s,margin-top .18s}
+.wt:hover .wt-acts,.wt.sel .wt-acts{max-height:26px;opacity:1;margin-top:6px}
+.mini{height:21px;padding:0 8px;border-radius:5px;border:.5px solid var(--hair);background:transparent;color:var(--ink3);font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;transition:background .1s,color .1s,border-color .1s}
+.mini:hover{background:color-mix(in srgb,var(--ink) 6%,transparent);color:var(--ink)}
+.mini.pri{background:color-mix(in srgb,var(--blue) 15%,transparent);border-color:color-mix(in srgb,var(--blue) 32%,transparent);color:var(--blue)}
+.mini.pri:hover{background:color-mix(in srgb,var(--blue) 24%,transparent)}
+.mini.danger:hover{color:var(--red);border-color:color-mix(in srgb,var(--red) 38%,transparent)}
+.create{margin:6px 8px 2px;padding:9px;border-radius:8px;border:.5px solid var(--hair2);background:var(--s-card);display:none;flex-direction:column;gap:6px}
+.create.on{display:flex}
+.create label{font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--dim)}
+.create .row{display:flex;gap:5px;align-items:center}
+.create input,.create select{flex:1;min-width:0;height:26px;padding:0 7px;border-radius:5px;border:.5px solid var(--hair2);background:var(--s-input);color:var(--ink);font-family:var(--mono);font-size:11.5px;outline:none}
+.create select{appearance:none;-webkit-appearance:none;padding-right:22px;background-image:linear-gradient(45deg,transparent 50%,var(--ink3) 50%),linear-gradient(135deg,var(--ink3) 50%,transparent 50%);background-position:calc(100% - 12px) 11px,calc(100% - 8px) 11px;background-size:4px 4px,4px 4px;background-repeat:no-repeat;cursor:pointer}
+.create select option{background:var(--s-card);color:var(--ink)}
+.create input:focus,.create select:focus{border-color:color-mix(in srgb,var(--blue) 60%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 16%,transparent)}
+.create .hint{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.br{display:flex;align-items:center;gap:7px;margin:1px 8px;padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:11.5px;color:var(--ink2);cursor:pointer;position:relative}
+.br:hover{background:color-mix(in srgb,var(--ink) 5%,transparent);color:var(--ink)}
+.br .bi{flex:none;display:inline-flex;opacity:.6}
+.br.cur .bi{color:var(--blue);opacity:1}
+.br .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.br.cur .nm{color:var(--ink);font-weight:600}
+.br .ab{margin-left:auto;display:flex;gap:6px;font-size:9.5px;color:var(--dim);align-items:center;padding-left:4px}
+.br.confirming{background:color-mix(in srgb,var(--amber) 7%,transparent);box-shadow:inset 2px 0 0 var(--amber)}
+.br.confirming[data-tone="error"]{background:color-mix(in srgb,var(--red) 8%,transparent);box-shadow:inset 2px 0 0 var(--red)}
+.br .hl{font-size:9px;padding:1px 4px;border-radius:3px;color:var(--blue);background:color-mix(in srgb,var(--blue) 14%,transparent)}
+.br .hl.v{color:var(--violet);background:color-mix(in srgb,var(--violet) 14%,transparent)}
+.br .hl.t{color:var(--teal);background:color-mix(in srgb,var(--teal) 14%,transparent)}
+.br .up{color:var(--green)}
+.br .act{display:none;margin-left:auto}
+.br:hover .act{display:inline-flex}
+.br:hover .ab{display:none}
+.rail-foot{flex:none;border-top:.5px solid var(--hair);padding:7px 14px;font-family:var(--mono);font-size:9.5px;color:var(--dim);display:flex;align-items:center;gap:6px}
+.rail-foot .dot{color:var(--blue)}
+
+/* ---------- 空态 ---------- */
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:40px;text-align:center}
+.empty .ring{width:56px;height:56px;border-radius:50%;border:1px dashed var(--hair3);display:grid;place-items:center;color:var(--dim)}
+.empty h2{margin:0;font-size:15px;font-weight:600;color:var(--ink)}
+.empty p{margin:0;max-width:430px;font-size:12.5px;line-height:1.65;color:var(--ink3)}
+.empty code{font-family:var(--mono);font-size:11.5px;padding:1px 5px;border-radius:4px;background:var(--s-card-hi);color:var(--ink2)}
+
+/* ---------- 状态条 ---------- */
+.statusline{flex:none;height:27px;display:flex;align-items:center;gap:12px;padding:0 16px;border-top:.5px solid var(--hair);font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;color:var(--dim);background:var(--s-status)}
+.statusline .k{color:var(--ink3)}
+.statusline .sep{color:var(--dim2)}
+html.preload *,html.preload *::before,html.preload *::after{transition:none!important}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ==========================================================
+   追加：分支操作菜单 / 危险确认 / 新建表单的退出
+   ========================================================== */
+
+/* 分支行右侧：徽标与 ⋯ 常驻，悬停时让位给「检出」 */
+.br .more{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;border:none;background:transparent;color:var(--dim);font-size:13px;line-height:1;cursor:pointer;opacity:.55;transition:opacity .1s,background .1s,color .1s}
+.br:hover .more,.br .more[aria-expanded=true]{opacity:1;color:var(--ink2);background:color-mix(in srgb,var(--ink) 8%,transparent)}
+.br .more:hover{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
+.br.menu-open{background:color-mix(in srgb,var(--ink) 6%,transparent);color:var(--ink)}
+.br.removing{opacity:.45}
+
+/* 弹出菜单 */
+.menu{position:absolute;right:6px;top:calc(100% + 2px);z-index:30;min-width:196px;padding:4px;border-radius:9px;background:var(--s-card-hi);border:.5px solid var(--hair2);box-shadow:0 2px 4px rgba(0,0,0,.3),0 14px 30px -10px rgba(0,0,0,.62);display:none;animation:menu-in .12s var(--ease)}
+.menu.on{display:block}
+.menu.up{top:auto;bottom:calc(100% + 2px)}
+@keyframes menu-in-up{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.menu.up.on{animation-name:menu-in-up}
+@keyframes menu-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.menu button{display:flex;align-items:center;gap:8px;width:100%;height:26px;padding:0 8px;border:none;border-radius:5px;background:transparent;color:var(--ink2);font-size:11.5px;font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;white-space:nowrap}
+.menu button:hover:not(:disabled){background:color-mix(in srgb,var(--ink) 8%,transparent);color:var(--ink)}
+.menu button:disabled{color:var(--dim2);cursor:default}
+.menu button .mk{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--dim)}
+.menu button.danger{color:var(--red)}
+.menu button.danger:hover:not(:disabled){background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--red)}
+.menu button.danger:disabled{color:var(--dim2)}
+.menu hr{height:.5px;border:none;margin:4px 6px;background:var(--hair)}
+
+/* 危险确认块：沿用插件既有的 warn/error 语义 */
+.cf{margin:3px 8px 5px;padding:8px 9px;border-radius:8px;border:.5px solid color-mix(in srgb,var(--warnc,var(--amber)) 52%,transparent);background:color-mix(in srgb,var(--warnc,var(--amber)) 9%,transparent);display:flex;flex-direction:column;gap:6px;animation:cf-in .14s var(--ease)}
+.cf[data-tone="error"]{--warnc:var(--red)}
+@keyframes cf-in{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}
+.cf-title{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;line-height:16px;color:var(--warnc,var(--amber))}
+.cf-body{font-size:11px;line-height:16px;color:var(--ink3)}
+.cf-body code{font-family:var(--mono);font-size:10px;padding:1px 4px;border-radius:3px;background:color-mix(in srgb,var(--ink) 8%,transparent);color:var(--ink2);word-break:break-all}
+.cf-acts{display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end;margin-top:1px}
+.cf-check{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--ink3);cursor:pointer;margin-right:auto}
+.cf-check input{accent-color:var(--red);margin:0;width:12px;height:12px}
+.mini.danger-solid{background:color-mix(in srgb,var(--red) 18%,transparent);border-color:color-mix(in srgb,var(--red) 42%,transparent);color:var(--red)}
+.mini.danger-solid:hover{background:color-mix(in srgb,var(--red) 28%,transparent);color:var(--red)}
+
+/* 工作树卡内的移除确认 */
+.wt-cf{margin-top:6px;padding-top:7px;border-top:.5px solid var(--hair);display:flex;flex-direction:column;gap:6px}
+.wt.removing{opacity:.5}
+
+/* 新建表单：带标题栏与两个退出点 */
+.create-head{display:flex;align-items:center;gap:6px}
+.create-title{font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink3)}
+.create-x{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:auto;border:none;border-radius:4px;background:transparent;color:var(--dim);font-size:12px;line-height:1;cursor:pointer}
+.create-x:hover{background:color-mix(in srgb,var(--ink) 8%,transparent);color:var(--ink)}
+.create-foot{display:flex;align-items:center;gap:5px;margin-top:1px}
+.create-note{font-size:10px;line-height:14px;color:var(--dim)}
+
+/* 轻提示 */
+.toast{position:absolute;left:50%;bottom:42px;transform:translate(-50%,6px);z-index:40;display:flex;align-items:center;gap:7px;padding:7px 11px;border-radius:8px;border:.5px solid color-mix(in srgb,var(--green) 40%,transparent);background:color-mix(in srgb,var(--green) 12%,var(--s-card));color:var(--ink2);font-size:11.5px;box-shadow:0 10px 26px -12px rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .16s,transform .16s var(--ease)}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast .tick{color:var(--green);font-size:12px}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sb-brand"><span class="sb-mark">◈</span> DeepSeek Harness</div>
+    <div class="sb-label">会话</div>
+    <div class="sb-row on"><span class="sb-dot"></span>Fix worktree UI to match requi…</div>
+    <div class="sb-row"><span class="sb-dot" style="background:var(--violet)"></span>工作树机架：槽位读数与 LED</div>
+    <div class="sb-row"><span class="sb-dot" style="background:var(--teal)"></span>轨迹图：lane 布局与环形节点</div>
+    <div class="sb-row"><span class="sb-dot"></span>分支面板的会话分域</div>
+    <div class="sb-spacer"></div>
+  </aside>
+
+  <main class="main">
+    <header class="chead">
+      <div class="title-row">
+        <div class="title">Fix worktree UI to match require…</div>
+        <span class="chip">PTC 模式</span>
+        <span class="row-fill"></span>
+        <button class="util" title="更多">⋯</button>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="chat">对话</button>
+        <button class="tab" role="tab" data-tab="trajectory">轨迹</button>
+        <button class="tab on" role="tab" data-tab="worktree" aria-selected="true">工作树<span class="tab-count" id="tab-count">3</span></button>
+      </div>
+    </header>
+
+    <section class="views">
+      <div class="view" data-view="chat">
+        <div class="ghost"><div class="sk s1"></div><div class="sk s2"></div><div class="sk s3"></div><span>对话视图（原样保留）</span></div>
+      </div>
+      <div class="view" data-view="trajectory">
+        <div class="ghost"><div class="sk s1"></div><div class="sk s3"></div><div class="sk s2"></div><span>轨迹视图（原样保留）</span></div>
+      </div>
+
+      <div class="view on" data-view="worktree">
+        <div class="readout">
+          <div class="ro-cell"><span class="ro-cap">仓库</span><span class="ro-val sans">dsh-worktree</span></div>
+          <div class="ro-cell"><span class="ro-cap">HEAD</span><span class="ro-val">8e3a45d <span class="u">· main</span></span></div>
+          <div class="ro-cell"><span class="ro-cap">上游</span><span class="ro-val">origin/main <span class="delta up">↑2</span><span class="delta down">↓0</span></span></div>
+          <div class="ro-cell"><span class="ro-cap">未提交</span><span class="ro-val" style="color:var(--amber)">3 <span class="u">files</span></span></div>
+          <div class="ro-cell"><span class="ro-cap">工作树</span><span class="ro-val" id="ro-wt">2 <span class="u">池内</span> + 1 <span class="u">主检出</span></span></div>
+          <div class="ro-cell"><span class="ro-cap">近 14 天</span><div class="spark" id="spark"></div></div>
+          <div class="ro-cell ro-grow"><span class="ro-cap">池目录</span><span class="ro-val">~/.dsh-worktree</span></div>
+        </div>
+
+        <div class="stage">
+          <div class="pane" id="pane">
+            <div class="pane-head">
+              <span class="pane-title"><b>提交图</b></span>
+              <span class="pane-meta"><span id="pm-shown">最近 16 个提交</span><span id="pm-branch">3 条分叉</span><span id="pm-wt">3 工作树</span></span>
+              <span class="grow"></span>
+              <button class="iconbtn" id="new-branch-btn">＋ 新建分支</button>
+              <button class="iconbtn" id="refresh" title="刷新（8s 缓存）">↻</button>
+            </div>
+            <div class="graph" id="graph"></div>
+            <div class="graph-fade"></div>
+            <div class="worktree-changes">
+              <div class="wc-head">
+                <span class="wc-title">工作区</span>
+                <span class="wc-count">3 处未提交</span>
+                <span class="grow"></span>
+                <button class="iconbtn">全部暂存</button>
+              </div>
+              <div class="chg"><span class="st m">M</span><span class="p">client/panel.js</span><span class="plus">+48</span><span class="minus">−12</span></div>
+              <div class="chg"><span class="st a">A</span><span class="p">client/graph.js</span><span class="plus">+312</span><span class="minus">−0</span></div>
+              <div class="chg"><span class="st d">D</span><span class="p">client/legacy-picker.js</span><span class="plus">+0</span><span class="minus">−86</span></div>
+            </div>
+            <div class="detail" id="detail">
+              <div class="detail-inner">
+                <div class="d-head">
+                  <span class="d-hash">8e3a45d</span>
+                  <span class="d-subj">记账读时清理死条目并对缺失工作树报错</span>
+                  <span class="grow"></span>
+                  <span class="ref head">HEAD → main</span>
+                </div>
+                <div class="d-meta"><span><b>作者</b>buglan</span><span><b>时间</b>2 分钟前</span><span><b>变更</b>+48 −12 · 2 files</span></div>
+                <div class="d-bar"><i class="add" style="width:58%"></i><i class="del" style="width:15%"></i><i class="rest"></i></div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="rail">
+            <div class="rail-head">
+              <span class="pane-title"><b>工作树</b></span>
+              <span class="pane-meta"><span id="rail-wt-count">2 池内</span></span>
+              <span class="grow"></span>
+              <button class="iconbtn" id="toggle-create">＋ 新建</button>
+            </div>
+            <div class="rail-body">
+              <div class="sec-head">机架 <span class="n" id="rack-count">3/4</span></div>
+              <div id="wt-list"></div>
+
+              <div class="wt ghostcard" id="create-btn">＋ 新建工作树</div>
+              <div class="create" id="create-form">
+                <div class="create-head">
+                  <span class="create-title">新建工作树</span>
+                  <button class="create-x" id="create-x" title="取消（Esc）">✕</button>
+                </div>
+                <div><label>分支名</label></div>
+                <div class="row"><input id="new-branch" value="feat/picker-graph" spellcheck="false"></div>
+                <div class="row"><select id="new-base"><option>从 main 创建</option><option>从 origin/main 创建</option><option>从当前 HEAD 创建</option></select></div>
+                <div class="create-note">目录建在池里，分支名保持原样。</div>
+                <div class="create-foot">
+                  <span class="hint" id="pool-hint">→ ~/.dsh-worktree/wt-8b30</span>
+                  <span class="grow"></span>
+                  <button class="mini" id="create-cancel">取消</button>
+                  <button class="mini pri" id="create-ok">创建并打开</button>
+                </div>
+              </div>
+
+              <div class="sec-head">本地分支 <span class="n" id="br-count">5</span></div>
+              <div id="br-list"></div>
+
+              <div class="sec-head">远程 <span class="n">3</span></div>
+              <div id="remote-list"></div>
+            </div>
+            <div class="rail-foot"><span class="dot">◆</span> 检出状态 · .branches.json · 8s 前刷新</div>
+          </aside>
+        </div>
+
+        <div class="toast" id="toast"><span class="tick">✓</span><span id="toast-text"></span></div>
+
+        <div class="statusline">
+          <span><span class="k" id="stat-wt">3</span> 工作树</span><span class="sep">/</span>
+          <span><span class="k" id="stat-br">5</span> 本地分支</span><span class="sep">/</span>
+          <span><span class="k">3</span> 远程</span>
+          <span class="grow"></span>
+          <span>↑↓ 选择 · ⏎ 详情 · ⋯ 分支操作 · Esc 逐步退出</span><span class="sep">/</span>
+          <span id="clock">状态 8 秒前刷新</span>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  var LANE_W = 20, X0 = 16, ROW_H = 42, NODE_Y = 21;
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function laneColors() {
+    return [cssVar('--blue'), cssVar('--teal'), cssVar('--violet'), cssVar('--amber')];
+  }
+  var COLORS = laneColors();
+  var esc = function (s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  };
+  function lx(l) { return X0 + l * LANE_W; }
+  function colorOf(l) { return COLORS[l % COLORS.length]; }
+
+  /* ---------------- 提交图数据：只给 DAG，泳道由算法推导 ---------------- */
+  // 与 git --date-order 一致：时间自上而下单调递减，合并提交排在两个父提交之前。
+  var COMMITS = [
+    { hash: '8e3a45d', parents: ['de8c946'], subject: '记账读时清理死条目并对缺失工作树报错', when: '7 分钟前',
+      refs: [{ t: 'head', label: 'HEAD → main' }, { t: 'outline', label: 'origin/main' }], head: true },
+    { hash: 'de8c946', parents: ['b84aa4e'], subject: '按需求修复分支面板的会话分域与切换交互', when: '21 分钟前', refs: [] },
+    { hash: 'b84aa4e', parents: ['900d532', '5c1e9a2'], subject: 'Merge branch feat/graph-view into main', when: '43 分钟前', refs: [] },
+    { hash: '5c1e9a2', parents: ['02b7d4e'], subject: '轨迹图：lane 布局与环形节点', when: '52 分钟前',
+      refs: [{ t: 'teal', label: 'feat/graph-view' }, { t: 'outline', label: 'wt-7c2a' }] },
+    { hash: '7d3fa88', parents: ['02b7d4e'], subject: '工作树机架：槽位读数与 LED 状态', when: '1 小时前',
+      refs: [{ t: 'violet', label: 'feat/worktree-rail' }, { t: 'outline', label: 'wt-a3f1' }] },
+    { hash: '02b7d4e', parents: ['900d532'], subject: '分支铭牌贴合节点，合并弧线改用贝塞尔', when: '1 小时前', refs: [] },
+    { hash: '900d532', parents: ['fecd32e'], subject: 'persist the session-to-checkout map so a worktree stays a worktree', when: '2 小时前', refs: [] },
+    { hash: 'fecd32e', parents: ['92cc548'], subject: 'hide the branch entry entirely outside a Git repository', when: '3 小时前', refs: [] },
+    { hash: '92cc548', parents: ['3d63bb7'], subject: 'cold sessions resolve from the durable header', when: '3 小时前',
+      refs: [{ t: 'tag', label: 'v0.1.0' }] },
+    { hash: '3d63bb7', parents: ['03e199a'], subject: 'plain create field, refresh the trigger as soon as a worktree session opens', when: '4 小时前', refs: [] },
+    { hash: '03e199a', parents: ['3c8a6d1'], subject: 'unify the worktree field, show wt-id/branch in full contrast', when: '5 小时前', refs: [] },
+    { hash: '3f2c801', parents: ['ac8b6f9'], subject: 'chevron takes an explicit direction, points up while the panel is above', when: '6 小时前',
+      refs: [{ t: 'teal', label: 'fix/chevron' }] },
+    { hash: 'ac8b6f9', parents: ['3c8a6d1'], subject: 'trigger chevron points the way the panel actually opened', when: '6.5 小时前', refs: [] },
+    { hash: '3c8a6d1', parents: ['61415ee'], subject: 'worktree rows use VS Code glyph, main checkout keeps the branch mark', when: '7 小时前', refs: [] },
+    { hash: '61415ee', parents: ['b822f47'], subject: 'pool directories are wt-<hex> ids, branch names stay verbatim', when: '8 小时前', refs: [] },
+    { hash: 'b822f47', parents: [], subject: 'a worktree always continues in a new session, drop the open toggle', when: '8 小时前', refs: [] }
+  ];
+
+  /**
+   * 从 parent 关系推导泳道，思路同 git log --graph：
+   * 列 = 「尚未到达的提交」的等待队列。
+   */
+  function layout(commits) {
+    var cols = [], rows = [];
+    for (var ci = 0; ci < commits.length; ci++) {
+      var c = commits[ci];
+      var prev = cols.slice();
+      var lane = cols.indexOf(c.hash);
+      var incoming = [];
+      if (lane === -1) {
+        lane = cols.indexOf(null);
+        if (lane === -1) { lane = cols.length; cols.push(c.hash); } else cols[lane] = c.hash;
+      } else {
+        for (var i = 0; i < cols.length; i++) {
+          if (i !== lane && cols[i] === c.hash) { incoming.push(i); cols[i] = null; }
+        }
+      }
+      var pass = [];
+      for (var j = 0; j < cols.length; j++) {
+        if (j === lane || incoming.indexOf(j) !== -1) continue;
+        if (cols[j] !== null) pass.push(j);
+      }
+      var outgoing = [];
+      if (c.parents.length > 0) {
+        // 第一个父提交：若它已经在别的列里等待，本列要弯过去，而不是继续直下
+        var first = c.parents[0];
+        var firstAt = -1;
+        for (var f = 0; f < cols.length; f++) if (f !== lane && cols[f] === first) firstAt = f;
+        if (firstAt !== -1) {
+          cols[lane] = null;
+          outgoing.push({ lane: firstAt, kind: 'merge' });
+        } else {
+          cols[lane] = first;
+          outgoing.push({ lane: lane, kind: 'continue' });
+        }
+        for (var k = 1; k < c.parents.length; k++) {
+          var p = c.parents[k];
+          var existing = -1;
+          for (var m = 0; m < cols.length; m++) if (m !== lane && cols[m] === p) existing = m;
+          if (existing !== -1) {
+            outgoing.push({ lane: existing, kind: 'merge' });
+          } else {
+            var free = cols.indexOf(null);
+            if (free === -1) { free = cols.length; cols.push(p); } else cols[free] = p;
+            outgoing.push({ lane: free, kind: 'branch' });
+          }
+        }
+      } else {
+        cols[lane] = null;
+      }
+      var laneTop = prev[lane] !== null && prev[lane] !== undefined;
+      var incomingTop = incoming.filter(function (x) { return prev[x] !== null && prev[x] !== undefined; });
+      while (cols.length > 0 && cols[cols.length - 1] === null) cols.pop();
+      rows.push({ commit: c, lane: lane, laneTop: laneTop, pass: pass, incoming: incomingTop, outgoing: outgoing });
+    }
+    return rows;
+  }
+
+  function laneCount(rows) {
+    var max = 1;
+    rows.forEach(function (r) {
+      max = Math.max(max, r.lane + 1);
+      r.pass.forEach(function (i) { max = Math.max(max, i + 1); });
+      r.incoming.forEach(function (i) { max = Math.max(max, i + 1); });
+      r.outgoing.forEach(function (o) { max = Math.max(max, o.lane + 1); });
+    });
+    return max;
+  }
+
+  /** 一条竖线（直线，颜色按列）。 */
+  function vline(lane, y0, y1) {
+    return '<line x1="' + lx(lane) + '" y1="' + y0 + '" x2="' + lx(lane) + '" y2="' + y1 +
+      '" stroke="' + colorOf(lane) + '" stroke-opacity=".8" stroke-width="1.5"/>';
+  }
+  /**
+   * 相邻泳道之间的弯线。控制点只占竖直距离的一半，且横向偏移越大弯得越缓，
+   * 这样一条 1 列宽的弯看起来是「拐」而不是「折」。
+   */
+  function elbow(fromLane, toLane, fromY, toY, colorLane) {
+    var x0 = lx(fromLane), x1 = lx(toLane);
+    var dy = toY - fromY;
+    var k = Math.min(dy * 0.5, Math.abs(x1 - x0) * 1.15);
+    return '<path d="M' + x0 + ' ' + fromY + ' C ' + x0 + ' ' + (fromY + k) + ', ' + x1 + ' ' + (toY - k) +
+      ', ' + x1 + ' ' + toY + '" stroke="' + colorOf(colorLane) + '" stroke-opacity=".82" stroke-width="1.5" fill="none"/>';
+  }
+  function downCurve(fromLane, toLane, fromY, toY, colorLane) {
+    return fromLane === toLane ? vline(fromLane, fromY, toY) : elbow(fromLane, toLane, fromY, toY, colorLane);
+  }
+  function upCurve(fromLane, toLane, fromY, toY, colorLane) {
+    return fromLane === toLane ? vline(fromLane, fromY, toY) : elbow(fromLane, toLane, fromY, toY, colorLane);
+  }
+
+  var rows = layout(COMMITS);
+  var LANES = laneCount(rows);
+  // 供无头断言与 DevTools 自检：图的连线是否真的接得上
+  window.__wtGraph = { commits: COMMITS, rows: rows, laneCount: LANES };
+  var graph = document.getElementById('graph');
+  var selected = -1;
+
+  function rowSvg(r) {
+    var parts = [];
+    // 贯穿本行的列：整段竖线
+    r.pass.forEach(function (l) { parts.push(vline(l, 0, ROW_H)); });
+    // 汇入本节点的列：从行顶弯下来，收到节点边缘为止
+    r.incoming.forEach(function (l) { parts.push(upCurve(l, r.lane, 0, NODE_Y - 5, r.lane)); });
+    // 节点上方：同列继续 → 直线；否则不画（分支尖端）
+    if (r.laneTop) parts.push(vline(r.lane, 0, NODE_Y - 5));
+    // 节点下方
+    r.outgoing.forEach(function (o) {
+      if (o.kind === 'continue') parts.push(vline(o.lane, NODE_Y + 4, ROW_H));
+      else parts.push(downCurve(r.lane, o.lane, NODE_Y + 4, ROW_H, o.lane));
+    });
+    return parts.join('');
+  }
+
+  function renderGraph() {
+    COLORS = laneColors();
+    graph.innerHTML = '';
+    var width = X0 * 2 + Math.max(1, LANES - 1) * LANE_W + 18;
+    rows.forEach(function (r, i) {
+      var c = r.commit;
+      var el = document.createElement('div');
+      el.className = 'crow' + (i === selected ? ' sel' : '');
+      var refs = c.refs.map(function (f) { return '<span class="ref ' + f.t + '">' + f.label + '</span>'; }).join('');
+      el.innerHTML =
+        '<div class="lane" style="width:' + width + 'px"><svg width="' + width + '" height="' + ROW_H + '">' +
+          rowSvg(r) + '</svg></div>' +
+        '<div class="topic"><span class="subj">' + esc(c.subject) + '</span>' + refs +
+        '<span class="hash">' + c.hash + '</span></div>' +
+        '<span class="when">' + c.when + '</span>';
+
+      var lane = el.querySelector('.lane');
+      if (c.head) {
+        var ring = document.createElement('span');
+        ring.className = 'node-ring';
+        ring.style.left = lx(r.lane) + 'px';
+        ring.style.top = NODE_Y + 'px';
+        ring.style.color = colorOf(r.lane);
+        lane.appendChild(ring);
+      }
+      var svg = el.querySelector('svg');
+      var core = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      core.setAttribute('cx', lx(r.lane));
+      core.setAttribute('cy', NODE_Y);
+      core.setAttribute('r', c.head ? 4.4 : 3.4);
+      core.setAttribute('fill', colorOf(r.lane));
+      core.setAttribute('stroke', cssVar('--halo'));
+      core.setAttribute('stroke-width', '3');
+      svg.appendChild(core);
+      el.addEventListener('click', function () { selectRow(i === selected ? -1 : i); });
+      graph.appendChild(el);
+    });
+  }
+
+  var detail = document.getElementById('detail');
+  function selectRow(i) {
+    selected = i;
+    var all = graph.querySelectorAll('.crow');
+    for (var k = 0; k < all.length; k++) all[k].classList.toggle('sel', k === i);
+    if (i < 0) { detail.classList.remove('on'); return; }
+    var r = rows[i];
+    detail.querySelector('.d-hash').textContent = r.commit.hash;
+    detail.querySelector('.d-subj').textContent = r.commit.subject;
+    detail.classList.add('on');
+  }
+
+  /* ---------------- 数据 ---------------- */
+  var worktrees = [
+    { id: 'main', slot: '00', name: 'main', label: 'dsh-worktree', labelTone: 'ink3',
+      branch: 'main', path: '主检出 · 当前会话', dirty: 3, primary: true, sel: true },
+    { id: 'wt-a3f1', slot: '01', name: 'wt-a3f1', branch: 'feat/worktree-rail', tone: 'violet',
+      path: '~/.dsh-worktree/wt-a3f1', dirty: 0 },
+    { id: 'wt-7c2a', slot: '02', name: 'wt-7c2a', branch: 'feat/graph-view', tone: 'teal',
+      path: '~/.dsh-worktree/wt-7c2a', dirty: 0 }
+  ];
+
+  var branches = [
+    { name: 'main', current: true, ahead: 2 },
+    { name: 'feat/graph-view', tone: 'teal', wt: 'wt-7c2a' },
+    { name: 'feat/worktree-rail', tone: 'violet', wt: 'wt-a3f1' },
+    { name: 'feat/picker-polish', unmerged: 2 },
+    { name: 'fix/host-cache', unmerged: 0 }
+  ];
+
+  /* 交互状态 */
+  var openMenu = null;        // 展开 ⋯ 的分支名
+  var confirmBr = null;       // 待确认删除的分支 { name, force }
+  var confirmWt = null;       // 待确认移除的工作树 { id, force }
+  var createOpen = false;
+
+  function branchOf(name) {
+    for (var i = 0; i < branches.length; i++) if (branches[i].name === name) return branches[i];
+    return null;
+  }
+  function worktreeOf(id) {
+    for (var i = 0; i < worktrees.length; i++) if (worktrees[i].id === id) return worktrees[i];
+    return null;
+  }
+
+  /* ---------------- 工作树机架 ---------------- */
+  var wtList = document.getElementById('wt-list');
+
+  function renderWorktrees() {
+    wtList.innerHTML = worktrees.map(function (w) {
+      var acts = w.primary
+        ? '<button class="mini pri" data-wt-act="resume" data-id="' + w.id + '">继续此会话</button>' +
+          '<button class="mini" data-wt-act="editor" data-id="' + w.id + '">在编辑器打开</button>'
+        : '<button class="mini pri" data-wt-act="open" data-id="' + w.id + '">进入会话</button>' +
+          '<button class="mini" data-wt-act="checkout" data-id="' + w.id + '">检出</button>' +
+          '<button class="mini danger" data-wt-act="remove" data-id="' + w.id + '">移除</button>';
+      var confirm = '';
+      if (confirmWt !== null && confirmWt.id === w.id) {
+        var dirtyLine = w.dirty > 0
+          ? '<div class="cf-body" style="color:var(--amber)">有 ' + w.dirty + ' 处未提交改动，移除会一并丢弃。</div>' +
+            '<label class="cf-check"><input type="checkbox" id="cf-force-wt"' + (confirmWt.force ? ' checked' : '') + '>我知道，强制移除（--force）</label>'
+          : '<div class="cf-body">工作树目录会被删除，分支 <code>' + esc(w.branch) + '</code> 保留。</div>';
+        confirm =
+          '<div class="cf" data-tone="' + (w.dirty > 0 ? 'error' : 'warn') + '">' +
+            '<div class="cf-title">移除 ' + esc(w.name) + '？</div>' + dirtyLine +
+            '<div class="cf-acts">' +
+              '<button class="mini" data-wt-act="cancel-remove">取消</button>' +
+              '<button class="mini danger-solid" data-wt-act="do-remove" data-id="' + w.id + '"' +
+                (w.dirty > 0 && !confirmWt.force ? ' disabled style="opacity:.45;cursor:default"' : '') + '>移除工作树</button>' +
+            '</div>' +
+          '</div>';
+      }
+      return '<div class="wt' + (w.sel ? ' sel' : '') + '" data-wt="' + w.id + '">' +
+        '<div class="wt-top">' +
+          '<span class="slot">' + w.slot + '</span>' +
+          '<span class="led ' + (w.dirty > 0 ? 'dirty' : 'ok') + '"></span>' +
+          '<span class="wt-name">' + esc(w.name) + '</span>' +
+          '<span class="wt-branch ' + (w.tone || '') + '"' + (w.labelTone ? ' style="color:var(--' + w.labelTone + ')"' : '') + '>' +
+            esc(w.label || w.branch) + '</span>' +
+        '</div>' +
+        '<div class="wt-sub">' +
+          (w.primary ? '<span class="pin">◆</span>' : '') +
+          '<span class="path">' + esc(w.path) + '</span>' +
+          (w.dirty > 0 ? '<span class="dirty-n">' + w.dirty + ' 处改动</span>' : '<span>干净</span>') +
+        '</div>' +
+        '<div class="wt-acts">' + acts + '</div>' + confirm +
+      '</div>';
+    }).join('');
+  }
+
+  /* ---------------- 分支 ---------------- */
+  var brList = document.getElementById('br-list');
+
+  function renderBranches() {
+    brList.innerHTML = branches.map(function (b) {
+      var badge = b.current
+        ? '<span class="up">↑' + b.ahead + '</span><span class="hl">当前</span>'
+        : (b.wt ? '<span class="hl ' + (b.tone || '') + '">' + b.wt + '</span>' : '<span>无工作树</span>');
+      var quick = b.current
+        ? '<span class="act"><button class="mini" disabled style="opacity:.45;cursor:default">已检出</button></span>'
+        : '<span class="act"><button class="mini" data-br-act="checkout" data-b="' + esc(b.name) + '">检出</button></span>';
+      var iconColor = b.tone ? ' style="color:var(--' + b.tone + ')"' : '';
+      var icon =
+        '<span class="bi"' + iconColor + '><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">' +
+        '<circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="4" r="1.6"/><path d="M4 10.4V4.6"/><path d="M12 5.6c0 3-2 4-4 4.4"/></svg></span>';
+
+      var menu = '';
+      if (openMenu === b.name) {
+        // 靠下的行向上开，避免菜单被 rail 的滚动边界裁掉
+        var up = branches.indexOf(b) >= branches.length - 2 ? ' up' : '';
+        menu = '<div class="menu on' + up + '" role="menu">' +
+          '<button data-br-act="checkout" data-b="' + esc(b.name) + '"' + (b.current ? ' disabled' : '') + '>检出到当前会话' +
+            '<span class="mk">Enter</span></button>' +
+          '<button data-br-act="worktree" data-b="' + esc(b.name) + '"' + (b.wt ? ' disabled' : '') + '>' +
+            (b.wt ? '已在 ' + b.wt + ' 检出' : '在新工作树打开') + '<span class="mk">wt</span></button>' +
+          '<button data-br-act="copy" data-b="' + esc(b.name) + '">复制分支名</button>' +
+          '<hr>' +
+          '<button class="danger" data-br-act="delete" data-b="' + esc(b.name) + '">删除分支…<span class="mk">Del</span></button>' +
+        '</div>';
+      }
+
+      var confirm = '';
+      if (confirmBr !== null && confirmBr.name === b.name) {
+        var tone = 'warn';
+        var title = '删除分支 ' + esc(b.name) + '？';
+        var body;
+        var primaryLabel = '删除分支';
+        var disabled = false;
+        if (b.current) {
+          tone = 'error';
+          body = '<div class="cf-body">这是当前检出的分支，不能删除。先检出别的分支再回来。</div>';
+          primaryLabel = '不可删除';
+          disabled = true;
+        } else if (b.wt) {
+          tone = 'error';
+          body = '<div class="cf-body">该分支在 <code>' + b.wt + '</code> 里检出，Git 会拒绝删除。<br>先移除那个工作树，或强制删除（分支和工作树目录会不一致）。</div>' +
+            '<div class="cf-acts" style="justify-content:flex-start"><button class="mini" data-br-act="goto-wt" data-wtid="' + b.wt + '">去移除 ' + b.wt + '</button></div>';
+          primaryLabel = '强制删除 -D';
+        } else if (b.unmerged > 0) {
+          body = '<div class="cf-body">有 <b style="color:var(--amber)">' + b.unmerged + '</b> 个提交还没合并到 main，删除后只能靠 reflog 找回。</div>' +
+            '<label class="cf-check"><input type="checkbox" id="cf-force-br"' + (confirmBr.force ? ' checked' : '') + '>我确认丢弃这些提交（-D）</label>';
+          primaryLabel = '强制删除 -D';
+          disabled = !confirmBr.force;
+        } else {
+          body = '<div class="cf-body">已全部合并，删除是安全的。</div>';
+        }
+        confirm =
+          '<div class="cf" data-tone="' + tone + '">' +
+            '<div class="cf-title">' + title + '</div>' + body +
+            '<div class="cf-acts">' +
+              '<button class="mini" data-br-act="cancel-delete">取消</button>' +
+              '<button class="mini danger-solid" data-br-act="do-delete" data-b="' + esc(b.name) + '"' +
+                (disabled ? ' disabled style="opacity:.45;cursor:default"' : '') + '>' + primaryLabel + '</button>' +
+            '</div>' +
+          '</div>';
+      }
+
+      var confirming = confirmBr !== null && confirmBr.name === b.name;
+      var tone = confirming ? (b.current || b.wt ? ' data-tone="error"' : '') : '';
+      return '<div class="br' + (b.current ? ' cur' : '') + (openMenu === b.name ? ' menu-open' : '') +
+        (confirming ? ' confirming' : '') + '"' + tone + ' data-branch="' + esc(b.name) + '">' +
+        icon + '<span class="nm">' + esc(b.name) + '</span>' +
+        '<span class="ab">' + badge + '</span>' + quick +
+        '<button class="more" data-br-act="menu" data-b="' + esc(b.name) + '" title="分支操作" aria-expanded="' + (openMenu === b.name) + '">⋯</button>' +
+        menu +
+      '</div>' + confirm;
+    }).join('');
+  }
+
+  function renderAll() {
+    renderWorktrees();
+    renderBranches();
+    var poolCount = worktrees.filter(function (w) { return !w.primary; }).length;
+    document.getElementById('rail-wt-count').textContent = poolCount + ' 池内';
+    document.getElementById('rack-count').textContent = worktrees.length + '/4';
+    document.getElementById('br-count').textContent = String(branches.length);
+    document.getElementById('stat-wt').textContent = String(worktrees.length);
+    document.getElementById('stat-br').textContent = String(branches.length);
+    document.getElementById('tab-count').textContent = String(worktrees.length);
+    document.getElementById('pm-wt').textContent = worktrees.length + ' 工作树';
+    document.getElementById('pm-shown').textContent = rows.length + ' 个提交';
+    document.getElementById('pm-branch').textContent = LANES + ' 条泳道';
+    document.getElementById('ro-wt').innerHTML = poolCount + ' <span class="u">池内</span> + 1 <span class="u">主检出</span>';
+  }
+
+  /* ---------------- 提示 ---------------- */
+  var toast = document.getElementById('toast');
+  var toastText = document.getElementById('toast-text');
+  var toastTimer = 0;
+  function say(msg) {
+    toastText.textContent = msg;
+    toast.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.classList.remove('on'); }, 2200);
+  }
+
+  /* ---------------- 新建表单（可取消） ---------------- */
+  var createBtn = document.getElementById('create-btn');
+  var createForm = document.getElementById('create-form');
+  var newBranch = document.getElementById('new-branch');
+
+  function openCreate() {
+    createOpen = true;
+    createForm.classList.add('on');
+    createBtn.style.display = 'none';
+    newBranch.focus();
+    newBranch.select();
+  }
+  function closeCreate() {
+    createOpen = false;
+    createForm.classList.remove('on');
+    createBtn.style.display = '';
+  }
+  createBtn.addEventListener('click', openCreate);
+  document.getElementById('toggle-create').addEventListener('click', openCreate);
+  document.getElementById('new-branch-btn').addEventListener('click', openCreate);
+  document.getElementById('create-x').addEventListener('click', closeCreate);
+  document.getElementById('create-cancel').addEventListener('click', function () { closeCreate(); say('已取消新建'); });
+  document.getElementById('create-ok').addEventListener('click', function () {
+    var name = newBranch.value.trim();
+    if (name === '') { newBranch.focus(); return; }
+    branches.push({ name: name, unmerged: 0 });
+    worktrees.push({ id: 'wt-8b30', slot: '03', name: 'wt-8b30', branch: name, tone: 'ink3',
+      path: '~/.dsh-worktree/wt-8b30', dirty: 0 });
+    closeCreate();
+    renderAll();
+    say('已创建 ' + name + ' → wt-8b30');
+  });
+
+  /* ---------------- 事件：分支（委托） ---------------- */
+  brList.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.id === 'cf-force-br' && confirmBr !== null) {
+      confirmBr.force = t.checked;
+      renderBranches();
+      var box = document.getElementById('cf-force-br');
+      if (box) box.checked = confirmBr.force;
+    }
+  });
+
+  brList.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-br-act]');
+    if (el === null) {
+      if (!e.target.closest('.menu') && !e.target.closest('.cf')) {
+        if (openMenu !== null) { openMenu = null; renderBranches(); }
+      }
+      return;
+    }
+    var act = el.dataset.brAct;
+    var name = el.dataset.b;
+
+    if (act === 'menu') {
+      openMenu = openMenu === name ? null : name;
+      confirmBr = null;
+      renderBranches();
+      return;
+    }
+    if (act === 'cancel-delete') { confirmBr = null; renderBranches(); return; }
+    if (act === 'do-delete') {
+      var target = branchOf(name);
+      if (target === null) return;
+      branches = branches.filter(function (b) { return b.name !== name; });
+      confirmBr = null; openMenu = null;
+      renderAll();
+      say('已删除分支 ' + name);
+      return;
+    }
+    if (act === 'goto-wt') {
+      var wid = el.dataset.wtid;
+      confirmBr = null; openMenu = null;
+      confirmWt = { id: wid, force: false };
+      renderAll();
+      var card = wtList.querySelector('[data-wt="' + wid + '"]');
+      if (card) card.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (act === 'delete') {
+      confirmBr = { name: name, force: false };
+      openMenu = null;
+      renderBranches();
+      return;
+    }
+    if (act === 'checkout') {
+      branches.forEach(function (b) { b.current = b.name === name; });
+      openMenu = null;
+      renderBranches();
+      say('已检出 ' + name);
+      return;
+    }
+    if (act === 'worktree') {
+      openCreate();
+      newBranch.value = name;
+      openMenu = null;
+      renderBranches();
+      return;
+    }
+    if (act === 'copy') {
+      if (navigator.clipboard) navigator.clipboard.writeText(name).catch(function () {});
+      openMenu = null;
+      renderBranches();
+      say('已复制 ' + name);
+      return;
+    }
+    if (act === 'row') {
+      openMenu = null;
+      renderBranches();
+    }
+  });
+
+  /* ---------------- 事件：工作树（委托） ---------------- */
+  wtList.addEventListener('change', function (e) {
+    if (e.target.id === 'cf-force-wt' && confirmWt !== null) {
+      confirmWt.force = e.target.checked;
+      renderWorktrees();
+    }
+  });
+
+  wtList.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-wt-act]');
+    var card = e.target.closest('.wt[data-wt]');
+    if (el === null) {
+      if (card) {
+        worktrees.forEach(function (w) { w.sel = w.id === card.dataset.wt; });
+        if (confirmWt !== null && confirmWt.id !== card.dataset.wt) confirmWt = null;
+        renderWorktrees();
+      }
+      return;
+    }
+    var act = el.dataset.wtAct;
+    var id = el.dataset.id || (card ? card.dataset.wt : null);
+    if (act === 'cancel-remove') { confirmWt = null; renderWorktrees(); return; }
+    if (act === 'remove') { confirmWt = { id: id, force: false }; renderWorktrees(); return; }
+    if (act === 'do-remove') {
+      var target = worktreeOf(id);
+      if (target !== null) {
+        worktrees = worktrees.filter(function (w) { return w.id !== id; });
+        confirmWt = null;
+        renderAll();
+        say('已移除 ' + target.name);
+      }
+      return;
+    }
+    if (act === 'resume') { say('继续当前会话'); return; }
+    if (act === 'open') { say('在新会话打开 ' + id); return; }
+    if (act === 'editor') { say('在编辑器打开'); return; }
+    if (act === 'checkout') {
+      var w = worktreeOf(id);
+      if (w) {
+        branches.forEach(function (b) { b.current = b.name === w.branch; });
+        renderAll();
+        say('已检出 ' + w.branch);
+      }
+      return;
+    }
+  });
+
+  /* ---------------- 全局：点空白 / Esc 逐层退出 ---------------- */
+  document.addEventListener('pointerdown', function (e) {
+    if (openMenu === null) return;
+    if (e.target.closest('#br-list')) return;
+    openMenu = null;
+    renderBranches();
+  }, true);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') {
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.target.closest('input,select')) {
+        e.preventDefault();
+        var next = selected + (e.key === 'ArrowDown' ? 1 : -1);
+        if (next < 0) next = rows.length - 1;
+        if (next >= rows.length) next = 0;
+        selectRow(next);
+      }
+      return;
+    }
+    // Esc 一次退一层：菜单 → 确认 → 新建表单 → 提交详情
+    if (openMenu !== null) { openMenu = null; renderBranches(); return; }
+    if (confirmBr !== null) { confirmBr = null; renderBranches(); return; }
+    if (confirmWt !== null) { confirmWt = null; renderWorktrees(); return; }
+    if (createOpen) { closeCreate(); return; }
+    if (selected >= 0) selectRow(-1);
+  });
+
+  /* ---------------- 其它 ---------------- */
+  var spark = document.getElementById('spark');
+  var vals = [2, 1, 4, 0, 3, 6, 2, 5, 1, 0, 3, 7, 4, 2];
+  var max = Math.max.apply(null, vals);
+  vals.forEach(function (v) {
+    var b = document.createElement('i');
+    b.style.height = Math.max(2, Math.round(v / max * 18)) + 'px';
+    if (v >= 6) b.classList.add('hot');
+    spark.appendChild(b);
+  });
+
+  var tabs = document.querySelectorAll('.tab'), views = document.querySelectorAll('.view');
+  for (var t = 0; t < tabs.length; t++) {
+    tabs[t].addEventListener('click', function () {
+      var name = this.dataset.tab;
+      for (var k = 0; k < tabs.length; k++) tabs[k].classList.toggle('on', tabs[k].dataset.tab === name);
+      for (var j = 0; j < views.length; j++) views[j].classList.toggle('on', views[j].dataset.view === name);
+    });
+  }
+
+  function syncScrollable() {
+    var pane = document.getElementById('pane');
+    pane.setAttribute('data-scrollable', graph.scrollHeight - graph.clientHeight > 2 ? 'true' : 'false');
+  }
+  graph.addEventListener('scroll', syncScrollable);
+  window.addEventListener('resize', syncScrollable);
+
+  renderGraph();
+  renderAll();
+
+  var params = new URLSearchParams(location.search);
+  var state = params.get('state');
+  if (state === 'commit') selectRow(0);
+  if (state === 'create') openCreate();
+  if (state === 'menu') { openMenu = 'feat/picker-polish'; renderBranches(); }
+  if (state === 'delete') { confirmBr = { name: 'feat/picker-polish', force: false }; renderBranches(); }
+  if (state === 'delete-blocked') { confirmBr = { name: 'feat/graph-view', force: false }; renderBranches(); }
+  if (state === 'remove-wt') { confirmWt = { id: 'wt-a3f1', force: false }; renderWorktrees(); }
+  if (state === 'wt') {
+    worktrees.forEach(function (w) { w.sel = w.id === 'wt-a3f1'; });
+    renderWorktrees();
+  }
+
+  requestAnimationFrame(function () {
+    document.documentElement.classList.remove('preload');
+    syncScrollable();
+  });
+
+  document.addEventListener('dblclick', function (e) {
+    if (e.target.closest('button,input,select,.crow')) return;
+    var light = document.documentElement.getAttribute('data-theme') === 'light';
+    if (light) document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', 'light');
+    renderGraph();
+    if (selected >= 0) selectRow(selected);
+  });
+})();
+</script>
+</body>
+</html>
