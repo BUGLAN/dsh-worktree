@@ -200,7 +200,8 @@ export function WorktreeView({ sessionId, worktree, t }) {
       }
       // 确认块插在行下方，可能落在可视区外：滚到最近位置让用户看见。
       requestAnimationFrame(() => {
-        railRef.current?.querySelector('.dsh-wt-cf')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        railRef.current?.querySelector('.dsh-wt-cf')?.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
       });
     } catch (cause) {
       setConfirmState({ kind: 'delete-failed', branch, message: cause instanceof Error ? cause.message : String(cause) });

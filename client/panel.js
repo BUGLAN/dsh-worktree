@@ -20,9 +20,14 @@ import { BranchIcon, CheckIcon, ChevronIcon, FolderIcon, PlusIcon, SearchIcon, S
  * @param onPlacement - notified with `above`/`below` so the trigger chevron can
  * point the way the panel actually opened.
  */
-function useAnchoredPanel(open, anchorRef, panelRef, gap = 6, onPlacement = undefined) {
+function useAnchoredPanel(open, mounted, anchorRef, panelRef, gap = 6, onPlacement = undefined) {
   useEffect(() => {
-    if (!open) return;
+    // mounted matters as much as open: the panel renders through a portal that
+    // appears one render AFTER open flips, so keying on open alone runs this
+    // effect while panelRef.current is still null — the panel would keep its
+    // static-flow position (off-screen in a tall page) because neither the
+    // sync placement nor the ResizeObserver ever saw it.
+    if (!open || !mounted) return;
     let raf = 0;
     let settled = false;
     const update = () => {
@@ -66,7 +71,42 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6, onPlacement = unde
       window.removeEventListener('resize', update);
       document.removeEventListener('scroll', update, true);
     };
-  }, [open, gap, anchorRef, panelRef, onPlacement]);
+  }, [open, mounted, gap, anchorRef, panelRef, onPlacement]);
+}
+
+/**
+ * Exit duration of the anchored panel; must match --dswt-dur-fast in
+ * styles.js, which the closed state uses as its transition-duration.
+ */
+const PANEL_EXIT_MS = 120;
+
+/**
+ * Keep the panel mounted through its exit transition and drive open/close as a
+ * CSS transition instead of a mount-time keyframe, so a close interrupted by a
+ * reopen resumes from the panel's current on-screen values instead of
+ * restarting from the entrance pose.
+ *
+ * data-open flips on only after two frames on first mount — a transition
+ * needs one committed closed style to animate away from — and immediately when
+ * the panel is already on screen (the interrupted-close path).
+ */
+function usePanelPresence(open, exitMs) {
+  const [mounted, setMounted] = useState(open);
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (open !== true) {
+      setOpened(false);
+      const timer = window.setTimeout(() => { setMounted(false); }, exitMs);
+      return () => { window.clearTimeout(timer); };
+    }
+    setMounted(true);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => { setOpened(true); });
+    });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+  }, [open, exitMs]);
+  return { mounted, opened };
 }
 
 /** Close on Escape and on pointer-down outside the anchor and panel. */
@@ -127,10 +167,11 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const panelRef = useRef(null);
   // Set by the anchoring effect: which side the panel took.
   const [placement, setPlacement] = useState('above');
+  const presence = usePanelPresence(open, PANEL_EXIT_MS);
   const close = useCallback(() => {
     setOpen(false);
   }, []);
-  useAnchoredPanel(open, anchorRef, panelRef, 6, setPlacement);
+  useAnchoredPanel(open, presence.mounted, anchorRef, panelRef, 6, setPlacement);
   useDismiss(open, anchorRef, panelRef, close);
 
   const cwd = typeof useSessions === 'function'
@@ -245,10 +286,16 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
           }),
         ],
       }),
-      open === true && createPortal(
+      presence.mounted === true && createPortal(
         jsx(BranchPanel, {
           panelRef,
           themeRef: anchorRef,
+          open,
+          // entered lags open by two frames on first mount (see
+          // usePanelPresence): the panel commits one closed style so the
+          // stylesheet's data-open transition has something to animate from.
+          entered: presence.opened,
+          placement,
           sessionId,
           status,
           loading,
@@ -272,7 +319,7 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
 /**
  * The panel body: search, current status, worktrees, branches, create form.
  */
-function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sessionBlank, api, store, t, refresh, onClose }) {
+function BranchPanel({ panelRef, themeRef, open, entered, placement, sessionId, status, loading, cwd, sessionBlank, api, store, t, refresh, onClose }) {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(null);
   const [confirm, setConfirm] = useState(null);
@@ -332,9 +379,12 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
       observer?.disconnect();
     };
   }, [themeRef]);
+  // Focus rides the open state, not the mount: the portal stays mounted
+  // through the exit transition, so reopening inside that window must refocus
+  // the search field exactly like a fresh open does.
   useEffect(() => {
-    searchRef.current?.focus({ preventScroll: true });
-  }, []);
+    if (open === true) searchRef.current?.focus({ preventScroll: true });
+  }, [open]);
   useEffect(() => {
     setConfirm(null);
     setError(null);
@@ -346,7 +396,10 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
     const body = bodyRef.current;
     if (body === null) return;
     const frame = requestAnimationFrame(() => {
-      body.scrollTop = body.scrollHeight;
+      // Smooth scroll follows the create form expanding into view; reduced
+      // motion keeps the previous instant jump.
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      body.scrollTo({ top: body.scrollHeight, behavior: reduced ? 'auto' : 'smooth' });
     });
     return () => {
       cancelAnimationFrame(frame);
@@ -592,6 +645,11 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
     role: 'dialog',
     'aria-label': t('panel.currentSection'),
     'data-testid': 'dsh-worktree-panel',
+    // data-open (the transition target, flipped in by usePanelPresence) and
+    // data-side (the direction-aware entrance offset) drive the stylesheet's
+    // open/close transition; see styles.js.
+    'data-open': entered === true ? 'true' : 'false',
+    'data-side': placement,
     style: themeVars,
     children: [
       jsxs('div', {

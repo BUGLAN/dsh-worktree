@@ -554,24 +554,39 @@ const zh = {
  * because a 5% black wash is invisible on the dark composer area.
  *
  * Density policy: 4/6/8px rhythm, 32px rows, no decorative gaps.
+ * Motion policy: one strong ease-out token and two durations (120ms for colour
+ * hovers and exits, 160ms for entrances and presses) cover every transition.
+ * All motion animates transform/opacity only; every anchored surface emerges
+ * from its trigger (below-trigger surfaces drop in from -Y, the composer
+ * picker above the composer rises from +Y), exits retrace its entrance, and
+ * prefers-reduced-motion keeps the fades while dropping the movement.
  * @module dsh-worktree/client/styles
  */
 
 const CSS = `
+/* Motion tokens (plugin-scoped; the host exposes no motion aliases): one
+   strong ease-out for every entrance, exit and state change; 120ms for colour
+   hovers and exits, 160ms for entrances and presses. Every rule below animates
+   transform/opacity only — nothing animates layout. */
+:root{--dswt-ease-out:cubic-bezier(.23,1,.32,1);--dswt-dur-fast:120ms;--dswt-dur-open:160ms}
 .dsh-wt-spinner{display:inline-block;border:1.5px solid var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));border-top-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));border-radius:50%;animation:dsh-wt-spin .7s linear infinite;flex:none}
 @keyframes dsh-wt-spin{to{transform:rotate(360deg)}}
+@keyframes dsh-wt-pulse{50%{opacity:.4}}
 
 @keyframes dsh-wt-enter{from{opacity:0;transform:translateY(4px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes dsh-wt-fade-in{from{opacity:0}}
 @keyframes dsh-wt-row-in{from{opacity:0;transform:translateX(-3px)}to{opacity:1;transform:none}}
+@keyframes dsh-wt-menu-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes dsh-wt-menu-in-up{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
 /* ---- composer toolbar trigger ---- */
 /* Keeps the toolbar's width stable while the first repository lookup runs, so the
    row does not jump once the trigger is either drawn or dropped. */
 .dsh-wt-trigger-placeholder{display:inline-block;width:0;height:28px;flex:none}
-.dsh-wt-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 5px 0 7px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500;line-height:20px;cursor:pointer;max-width:190px;transition:background .12s ease,color .12s ease}
+.dsh-wt-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 5px 0 7px;border:none;background:transparent;border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500;line-height:20px;cursor:pointer;max-width:190px;transition:background var(--dswt-dur-fast) ease,color var(--dswt-dur-fast) ease,transform var(--dswt-dur-open) var(--dswt-ease-out)}
 .dsh-wt-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-primary)}
 .dsh-wt-trigger:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
-.dsh-wt-trigger:active:not(:disabled){transform:translateY(.5px)}
+.dsh-wt-trigger:active:not(:disabled){transform:scale(.97)}
 .dsh-wt-trigger:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:default}
 .dsh-wt-trigger .dsh-wt-trigger-icon{display:inline-flex;flex:none;opacity:.9}
 .dsh-wt-trigger .dsh-wt-trigger-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -581,7 +596,15 @@ const CSS = `
 @container (width<=460px){.dsh-wt-trigger .dsh-wt-trigger-label{display:none}}
 
 /* ---- anchored panel ---- */
-.dsh-wt-panel{position:fixed;z-index:1100;width:352px;max-width:calc(100vw - 16px);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-overlay,Canvas));border:1px solid var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.28),0 14px 34px -8px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.045);display:flex;flex-direction:column;height:min(260px,calc(100vh - 88px));overflow:hidden;color:var(--dsw-alias-label-primary,CanvasText);font-size:13px;animation:dsh-wt-enter .14s cubic-bezier(.22,1,.36,1)}
+.dsh-wt-panel{position:fixed;z-index:1100;width:352px;max-width:calc(100vw - 16px);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-overlay,Canvas));border:1px solid var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.28),0 14px 34px -8px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.045);display:flex;flex-direction:column;height:min(260px,calc(100vh - 88px));overflow:hidden;color:var(--dsw-alias-label-primary,CanvasText);font-size:13px;opacity:0;transform:translateY(4px) scale(.985);transform-origin:center bottom;transition:opacity var(--dswt-dur-open) var(--dswt-ease-out),transform var(--dswt-dur-open) var(--dswt-ease-out)}
+/* Open/close is a transition driven by data-open (panel.js keeps the portal
+   mounted through the exit), so an interrupted close resumes from the panel's
+   current on-screen values instead of restarting from the entrance pose. The
+   exit is faster than the entrance, the closed state never takes pointers, and
+   data-side flips the offset: below the composer the panel drops in from -Y. */
+.dsh-wt-panel[data-side="below"]{transform:translateY(-4px) scale(.985);transform-origin:center top}
+.dsh-wt-panel[data-open="true"]{opacity:1;transform:none}
+.dsh-wt-panel[data-open="false"]{pointer-events:none;transition-duration:var(--dswt-dur-fast)}
 .dsh-wt-panel-search{display:flex;align-items:center;gap:7px;padding:8px 11px;border-bottom:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));flex:none}
 .dsh-wt-panel-search input{flex:1;min-width:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:18px;letter-spacing:-.01em;outline:none}
 .dsh-wt-panel-search input::placeholder{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:inherit}
@@ -602,7 +625,7 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-row-icon[data-variant="worktree"]{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));opacity:1}
 
 /* rows */
-.dsh-wt-panel .dsh-wt-row{display:flex;align-items:center;gap:8px;width:100%;padding:5px 11px;margin:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;text-align:left;cursor:pointer;border-radius:0;animation:dsh-wt-row-in .16s ease both}
+.dsh-wt-panel .dsh-wt-row{display:flex;align-items:center;gap:8px;width:100%;padding:5px 11px;margin:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;text-align:left;cursor:pointer;border-radius:0;animation:dsh-wt-row-in var(--dswt-dur-open) var(--dswt-ease-out) both}
 .dsh-wt-panel .dsh-wt-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07))}
 .dsh-wt-panel .dsh-wt-row:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
 .dsh-wt-panel .dsh-wt-row:disabled{cursor:default;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
@@ -628,21 +651,21 @@ const CSS = `
 /* footer: two atomic actions */
 .dsh-wt-footer{border-top:1px solid var(--dsw-alias-border-l1);padding:3px;flex:none;background:color-mix(in srgb,var(--dsw-alias-label-primary,#fff) 2.5%,transparent)}
 .dsh-wt-panel .dsh-wt-create-rows{display:flex;gap:4px}
-.dsh-wt-panel .dsh-wt-create-toggle{display:flex;align-items:center;justify-content:center;gap:5px;flex:1;min-width:0;padding:5px 8px;border:1px solid transparent;background:transparent;border-radius:7px;color:var(--dsw-alias-label-secondary);font-size:12.5px;font-weight:500;line-height:17px;cursor:pointer;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.dsh-wt-panel .dsh-wt-create-toggle{display:flex;align-items:center;justify-content:center;gap:5px;flex:1;min-width:0;padding:5px 8px;border:1px solid transparent;background:transparent;border-radius:7px;color:var(--dsw-alias-label-secondary);font-size:12.5px;font-weight:500;line-height:17px;cursor:pointer;transition:background var(--dswt-dur-fast) ease,color var(--dswt-dur-fast) ease,border-color var(--dswt-dur-fast) ease,transform var(--dswt-dur-open) var(--dswt-ease-out)}
 .dsh-wt-panel .dsh-wt-create-toggle:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07));color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l1)}
-.dsh-wt-panel .dsh-wt-create-toggle:active:not(:disabled){transform:translateY(.5px)}
+.dsh-wt-panel .dsh-wt-create-toggle:active:not(:disabled){transform:scale(.97)}
 .dsh-wt-panel .dsh-wt-create-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
 .dsh-wt-panel .dsh-wt-create-toggle:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));cursor:default}
 /* create form: one compact row — name, start point, submit */
-.dsh-wt-panel .dsh-wt-create-form{display:flex;align-items:center;gap:5px;padding:5px 6px 4px;animation:dsh-wt-enter .14s cubic-bezier(.22,1,.36,1)}
-.dsh-wt-panel .dsh-wt-create-form input[type=text]{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:18px;outline:none;transition:border-color .12s ease,box-shadow .12s ease}
+.dsh-wt-panel .dsh-wt-create-form{display:flex;align-items:center;gap:5px;padding:5px 6px 4px;animation:dsh-wt-enter var(--dswt-dur-open) var(--dswt-ease-out)}
+.dsh-wt-panel .dsh-wt-create-form input[type=text]{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:18px;outline:none;transition:border-color var(--dswt-dur-fast) ease,box-shadow var(--dswt-dur-fast) ease}
 .dsh-wt-panel .dsh-wt-create-form input[type=text]::placeholder{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:inherit}
 .dsh-wt-panel .dsh-wt-create-form input[type=text]:focus{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary,#4d8dff) 18%,transparent)}
 .dsh-wt-panel .dsh-wt-create-form select{flex:none;width:96px;height:28px;padding:0 4px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;line-height:18px;outline:none}
 .dsh-wt-panel .dsh-wt-create-form select:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
 .dsh-wt-panel .dsh-wt-create-form .dsh-wt-button{flex:none;height:28px;padding:0 10px}
-.dsh-wt-panel .dsh-wt-button{display:inline-flex;align-items:center;gap:5px;height:27px;padding:0 11px;border:none;border-radius:6px;font-size:12.5px;font-weight:500;line-height:18px;cursor:pointer;transition:background .12s ease,filter .12s ease,transform .08s ease}
-.dsh-wt-panel .dsh-wt-button:active:not(:disabled){transform:translateY(.5px)}
+.dsh-wt-panel .dsh-wt-button{display:inline-flex;align-items:center;gap:5px;height:27px;padding:0 11px;border:none;border-radius:6px;font-size:12.5px;font-weight:500;line-height:18px;cursor:pointer;transition:background var(--dswt-dur-fast) ease,filter var(--dswt-dur-fast) ease,transform var(--dswt-dur-open) var(--dswt-ease-out)}
+.dsh-wt-panel .dsh-wt-button:active:not(:disabled){transform:scale(.97)}
 .dsh-wt-panel .dsh-wt-button:disabled{cursor:default;opacity:.5}
 .dsh-wt-panel .dsh-wt-button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
 .dsh-wt-panel .dsh-wt-button[data-variant="primary"]{background:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary));color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3)}
@@ -662,7 +685,7 @@ const CSS = `
 .dsh-wt-panel .dsh-wt-error-title{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-state-error-primary);font-weight:600;font-size:12px;line-height:16px}
 .dsh-wt-panel .dsh-wt-error-body{color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px}
 .dsh-wt-panel .dsh-wt-error-body .dsh-wt-confirm-detail{display:block;margin-top:4px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;white-space:pre-wrap;word-break:break-all;max-height:60px;overflow-y:auto}
-.dsh-wt-panel .dsh-wt-toast{margin:6px 8px 2px;padding:6px 10px;border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#30a46c) 10%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-success-primary,#30a46c) 40%,transparent);color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px;display:flex;align-items:center;gap:6px}
+.dsh-wt-panel .dsh-wt-toast{margin:6px 8px 2px;padding:6px 10px;border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#30a46c) 10%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-success-primary,#30a46c) 40%,transparent);color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px;display:flex;align-items:center;gap:6px;animation:dsh-wt-fade-in var(--dswt-dur-open) var(--dswt-ease-out)}
 .dsh-wt-panel .dsh-wt-toast .dsh-wt-row-check{color:var(--dsw-alias-state-success-primary)}
 
 /* ---- sidebar decorations ---- */
@@ -705,7 +728,7 @@ const CSS = `
 .dsh-wt-graph::-webkit-scrollbar{width:9px}
 .dsh-wt-graph::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:5px;border:2px solid transparent;background-clip:padding-box}
 .dsh-wt-graph-empty{display:flex;align-items:flex-start}
-.dsh-wt-crow{position:relative;display:flex;align-items:center;height:42px;border-radius:6px;cursor:pointer;transition:background .1s ease}
+.dsh-wt-crow{position:relative;display:flex;align-items:center;height:42px;border-radius:6px;cursor:pointer;transition:background var(--dswt-dur-fast) ease,box-shadow var(--dswt-dur-fast) ease}
 .dsh-wt-crow:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 4%,transparent)}
 .dsh-wt-crow-sel{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent);box-shadow:inset 2px 0 0 var(--dsw-alias-state-business-primary)}
 .dsh-wt-crow-lane{flex:none;position:relative;height:42px}
@@ -722,7 +745,7 @@ const CSS = `
 .dsh-wt-node-ring[data-lane="2"]{color:var(--dsw-alias-state-warn-primary)}
 .dsh-wt-node-ring[data-lane="3"]{color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 50%,var(--dsw-alias-state-error-primary))}
 .dsh-wt-topic{display:flex;align-items:center;gap:8px;min-width:0;flex:1;padding-right:12px}
-.dsh-wt-subj{font-size:12.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.005em}
+.dsh-wt-subj{font-size:12.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.005em;transition:color var(--dswt-dur-fast) ease}
 .dsh-wt-crow-sel .dsh-wt-subj{color:var(--dsw-alias-label-primary)}
 .dsh-wt-ref{flex:none;display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:4px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10px;white-space:nowrap;color:var(--dsw-alias-label-tertiary);border:1px solid var(--dsw-alias-border-l1)}
 .dsh-wt-ref[data-kind=head]{color:var(--dsw-alias-state-business-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 35%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
@@ -732,7 +755,7 @@ const CSS = `
 .dsh-wt-when{flex:none;width:92px;text-align:right;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-variant-numeric:tabular-nums}
 
 /* 提交详情抽屉 */
-.dsh-wt-detail{flex:none;border-top:1px solid var(--dsw-alias-border-l1);padding:9px 16px 11px;background:color-mix(in srgb,var(--dsw-alias-label-primary) 2%,transparent)}
+.dsh-wt-detail{flex:none;border-top:1px solid var(--dsw-alias-border-l1);padding:9px 16px 11px;background:color-mix(in srgb,var(--dsw-alias-label-primary) 2%,transparent);animation:dsh-wt-menu-in var(--dswt-dur-open) var(--dswt-ease-out)}
 .dsh-wt-detail-head{display:flex;align-items:center;gap:8px}
 .dsh-wt-detail-hash{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;color:var(--dsw-alias-state-business-primary);padding:1px 6px;border-radius:4px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
 .dsh-wt-detail-subj{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -760,7 +783,8 @@ const CSS = `
 .dsh-wt-card-dirty[data-tone=warn]{color:var(--dsw-alias-state-warn-primary)}
 .dsh-wt-card-acts{display:flex;gap:4px;margin-top:7px;padding-left:13px}
 
-.dsh-wt-mini{height:21px;padding:0 8px;border-radius:5px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;transition:background .1s,color .1s,border-color .1s}
+.dsh-wt-mini{height:21px;padding:0 8px;border-radius:5px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;transition:background var(--dswt-dur-fast) ease,color var(--dswt-dur-fast) ease,border-color var(--dswt-dur-fast) ease,transform var(--dswt-dur-open) var(--dswt-ease-out)}
+.dsh-wt-mini:active:not(:disabled){transform:scale(.97)}
 .dsh-wt-mini:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent);color:var(--dsw-alias-label-primary)}
 .dsh-wt-mini:disabled{opacity:.5;cursor:default}
 .dsh-wt-mini-pri{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 32%,transparent);color:var(--dsw-alias-state-business-primary)}
@@ -773,7 +797,7 @@ const CSS = `
 .dsh-wt-sec-title{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
 .dsh-wt-sec-n{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;color:var(--dsw-alias-label-tertiary)}
 .dsh-wt-branch-wrap{position:relative}
-.dsh-wt-br{position:relative;display:flex;align-items:center;gap:7px;margin:1px 8px;padding:5px 8px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.dsh-wt-br{position:relative;display:flex;align-items:center;gap:7px;margin:1px 8px;padding:5px 8px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;color:var(--dsw-alias-label-secondary);transition:background var(--dswt-dur-fast) ease,color var(--dswt-dur-fast) ease}
 .dsh-wt-br:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 5%,transparent);color:var(--dsw-alias-label-primary)}
 .dsh-wt-br-icon{display:inline-flex;flex:none;opacity:.65;color:var(--dsw-alias-state-business-primary)}
 .dsh-wt-br-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -782,15 +806,16 @@ const CSS = `
 .dsh-wt-br-side{margin-left:auto;display:flex;gap:6px;align-items:center;font-size:9.5px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
 .dsh-wt-badge{font-size:9px;padding:1px 4px;border-radius:3px;color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 14%,transparent)}
 .dsh-wt-badge[data-tone=wt]{color:var(--dsw-alias-label-tertiary);background:color-mix(in srgb,var(--dsw-alias-label-primary) 7%,transparent)}
-.dsh-wt-more{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:13px;line-height:1;cursor:pointer;opacity:.55;transition:opacity .1s,background .1s,color .1s}
+.dsh-wt-more{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:13px;line-height:1;cursor:pointer;opacity:.55;transition:opacity var(--dswt-dur-fast) ease,background var(--dswt-dur-fast) ease,color var(--dswt-dur-fast) ease,transform var(--dswt-dur-open) var(--dswt-ease-out)}
+.dsh-wt-more:active{transform:scale(.97)}
 .dsh-wt-br:hover .dsh-wt-more,.dsh-wt-more[aria-expanded=true]{opacity:1;color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}
 .dsh-wt-br-open{background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent);color:var(--dsw-alias-label-primary)}
 
 /* 弹出菜单 */
-.dsh-wt-menu{position:absolute;right:6px;top:calc(100% + 2px);z-index:30;min-width:196px;padding:4px;border-radius:9px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l1);box-shadow:0 2px 4px rgba(0,0,0,.3),0 14px 30px -10px rgba(0,0,0,.6);animation:dsh-wt-menu-in .12s cubic-bezier(.22,1,.36,1)}
-.dsh-wt-menu-up{top:auto;bottom:calc(100% + 2px)}
-@keyframes dsh-wt-menu-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
-.dsh-wt-menu-item{display:flex;align-items:center;gap:8px;width:100%;height:26px;padding:0 8px;border:none;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11.5px;font-family:inherit;text-align:left;cursor:pointer;white-space:nowrap}
+.dsh-wt-menu{position:absolute;right:6px;top:calc(100% + 2px);z-index:30;min-width:196px;padding:4px;border-radius:9px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l1);box-shadow:0 2px 4px rgba(0,0,0,.3),0 14px 30px -10px rgba(0,0,0,.6);animation:dsh-wt-menu-in var(--dswt-dur-open) var(--dswt-ease-out)}
+/* An upward-flipped menu rises from below its trigger, mirroring the default. */
+.dsh-wt-menu-up{top:auto;bottom:calc(100% + 2px);animation-name:dsh-wt-menu-in-up}
+.dsh-wt-menu-item{display:flex;align-items:center;gap:8px;width:100%;height:26px;padding:0 8px;border:none;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11.5px;font-family:inherit;text-align:left;cursor:pointer;white-space:nowrap;transition:background var(--dswt-dur-fast) ease,color var(--dswt-dur-fast) ease}
 .dsh-wt-menu-item:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);color:var(--dsw-alias-label-primary)}
 .dsh-wt-menu-item:disabled{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-border-l2));cursor:default}
 .dsh-wt-menu-danger{color:var(--dsw-alias-state-error-primary)}
@@ -798,7 +823,7 @@ const CSS = `
 .dsh-wt-menu-sep{height:1px;border:none;margin:4px 6px;background:var(--dsw-alias-border-l1)}
 
 /* 状态化确认块（删除分支 / 移除工作树 / 脏切换） */
-.dsh-wt-cf{position:relative;z-index:2;margin:3px 8px 5px;padding:8px 9px;border-radius:8px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 8%,transparent);display:flex;flex-direction:column;gap:6px;animation:dsh-wt-menu-in .14s cubic-bezier(.22,1,.36,1)}
+.dsh-wt-cf{position:relative;z-index:2;margin:3px 8px 5px;padding:8px 9px;border-radius:8px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 8%,transparent);display:flex;flex-direction:column;gap:6px;animation:dsh-wt-menu-in var(--dswt-dur-open) var(--dswt-ease-out)}
 .dsh-wt-cf[data-tone=error]{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent)}
 .dsh-wt-cf-title{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;line-height:16px;color:var(--dsw-alias-state-warn-primary)}
 .dsh-wt-cf[data-tone=error] .dsh-wt-cf-title{color:var(--dsw-alias-state-error-primary)}
@@ -808,29 +833,35 @@ const CSS = `
 .dsh-wt-cf-check input{accent-color:var(--dsw-alias-state-error-primary);margin:0;width:12px;height:12px}
 
 /* 新建表单（三个退出点：✕ / 取消 / Esc） */
-.dsh-wt-create{margin:6px 8px 2px;padding:9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));display:flex;flex-direction:column;gap:6px}
+.dsh-wt-create{margin:6px 8px 2px;padding:9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));display:flex;flex-direction:column;gap:6px;animation:dsh-wt-menu-in var(--dswt-dur-open) var(--dswt-ease-out)}
 .dsh-wt-create-head{display:flex;align-items:center;gap:6px}
 .dsh-wt-create-title{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
-.dsh-wt-create-x{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:auto;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:12px;line-height:1;cursor:pointer}
+.dsh-wt-create-x{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:auto;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));font-size:12px;line-height:1;cursor:pointer;transition:background var(--dswt-dur-fast) ease,color var(--dswt-dur-fast) ease,transform var(--dswt-dur-open) var(--dswt-ease-out)}
+.dsh-wt-create-x:active{transform:scale(.97)}
 .dsh-wt-create-x:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);color:var(--dsw-alias-label-primary)}
 .dsh-wt-create-row{display:flex;gap:5px;align-items:center}
-.dsh-wt-create input,.dsh-wt-create select{flex:1;min-width:0;height:26px;padding:0 7px;border-radius:5px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;outline:none}
+.dsh-wt-create input,.dsh-wt-create select{flex:1;min-width:0;height:26px;padding:0 7px;border-radius:5px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;outline:none;transition:border-color var(--dswt-dur-fast) ease,box-shadow var(--dswt-dur-fast) ease}
 .dsh-wt-create input:focus,.dsh-wt-create select:focus{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 60%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 16%,transparent)}
 .dsh-wt-create-foot{display:flex;align-items:center;gap:5px;margin-top:1px}
 .dsh-wt-create-hint{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:10px;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.dsh-wt-create-toggle{margin:4px 8px;height:32px;border:1px dashed var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11.5px;cursor:pointer}
+.dsh-wt-create-toggle{margin:4px 8px;height:32px;border:1px dashed var(--dsw-alias-border-l2,var(--dsw-alias-border-l1));border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11.5px;cursor:pointer;transition:background var(--dswt-dur-fast) ease,color var(--dswt-dur-fast) ease}
 .dsh-wt-create-toggle:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 3%,transparent);color:var(--dsw-alias-label-primary)}
 
 /* 状态行 */
 .dsh-wt-tabbar{flex:none;height:27px;display:flex;align-items:center;gap:12px;padding:0 16px;border-top:1px solid var(--dsw-alias-border-l1);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:9.5px;letter-spacing:.05em;color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-secondary))}
-.dsh-wt-tabbar-note{max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-wt-tabbar-note{max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;animation:dsh-wt-fade-in var(--dswt-dur-open) var(--dswt-ease-out)}
 .dsh-wt-tabbar-note[data-tone=error]{color:var(--dsw-alias-state-error-primary)}
 .dsh-wt-tabbar-note[data-tone=ok]{color:var(--dsw-alias-state-success-primary)}
 .dsh-wt-tabbar-hint{margin-left:auto;flex:none}
 
 @media (prefers-reduced-motion:reduce){
-  .dsh-wt-panel,.dsh-wt-panel .dsh-wt-row,.dsh-wt-panel .dsh-wt-create-form{animation:none}
-  .dsh-wt-trigger:active:not(:disabled),.dsh-wt-panel .dsh-wt-create-toggle:active:not(:disabled),.dsh-wt-panel .dsh-wt-button:active:not(:disabled){transform:none}
+  /* Gentler, not zero: keep opacity fades and colour changes, drop movement.
+     The panel keeps a short opacity crossfade so open/close stays legible. */
+  .dsh-wt-panel,.dsh-wt-panel[data-side]{transform:none;transition:opacity var(--dswt-dur-fast) ease}
+  .dsh-wt-panel .dsh-wt-row,.dsh-wt-panel .dsh-wt-create-form,.dsh-wt-menu,.dsh-wt-menu-up,.dsh-wt-cf,.dsh-wt-create,.dsh-wt-detail{animation:dsh-wt-fade-in var(--dswt-dur-fast) ease both}
+  .dsh-wt-trigger .dsh-wt-trigger-chevron svg{transition:none!important}
+  .dsh-wt-spinner{animation:dsh-wt-pulse 1.1s ease-in-out infinite}
+  .dsh-wt-trigger:active:not(:disabled),.dsh-wt-panel .dsh-wt-create-toggle:active:not(:disabled),.dsh-wt-panel .dsh-wt-button:active:not(:disabled),.dsh-wt-mini:active:not(:disabled),.dsh-wt-more:active,.dsh-wt-create-x:active{transform:none}
 }
 `;
 //#endregion
@@ -913,7 +944,7 @@ function ChevronIcon({ direction = 'down', ...props }) {
     ...props,
     style: {
       transform: direction === 'up' ? 'rotate(180deg)' : 'rotate(0deg)',
-      transition: 'transform .12s ease',
+      transition: 'transform var(--dswt-dur-fast) var(--dswt-ease-out)',
       ...(props.style ?? {}),
     },
     children: jsx('path', { d: 'M12.78 6.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 7.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L8 9.94l3.72-3.72a.75.75 0 0 1 1.06 0Z' }),
@@ -1517,9 +1548,14 @@ class GitInfoStore {
  * @param onPlacement - notified with `above`/`below` so the trigger chevron can
  * point the way the panel actually opened.
  */
-function useAnchoredPanel(open, anchorRef, panelRef, gap = 6, onPlacement = undefined) {
+function useAnchoredPanel(open, mounted, anchorRef, panelRef, gap = 6, onPlacement = undefined) {
   useEffect(() => {
-    if (!open) return;
+    // mounted matters as much as open: the panel renders through a portal that
+    // appears one render AFTER open flips, so keying on open alone runs this
+    // effect while panelRef.current is still null — the panel would keep its
+    // static-flow position (off-screen in a tall page) because neither the
+    // sync placement nor the ResizeObserver ever saw it.
+    if (!open || !mounted) return;
     let raf = 0;
     let settled = false;
     const update = () => {
@@ -1563,7 +1599,42 @@ function useAnchoredPanel(open, anchorRef, panelRef, gap = 6, onPlacement = unde
       window.removeEventListener('resize', update);
       document.removeEventListener('scroll', update, true);
     };
-  }, [open, gap, anchorRef, panelRef, onPlacement]);
+  }, [open, mounted, gap, anchorRef, panelRef, onPlacement]);
+}
+
+/**
+ * Exit duration of the anchored panel; must match --dswt-dur-fast in
+ * styles.js, which the closed state uses as its transition-duration.
+ */
+const PANEL_EXIT_MS = 120;
+
+/**
+ * Keep the panel mounted through its exit transition and drive open/close as a
+ * CSS transition instead of a mount-time keyframe, so a close interrupted by a
+ * reopen resumes from the panel's current on-screen values instead of
+ * restarting from the entrance pose.
+ *
+ * data-open flips on only after two frames on first mount — a transition
+ * needs one committed closed style to animate away from — and immediately when
+ * the panel is already on screen (the interrupted-close path).
+ */
+function usePanelPresence(open, exitMs) {
+  const [mounted, setMounted] = useState(open);
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (open !== true) {
+      setOpened(false);
+      const timer = window.setTimeout(() => { setMounted(false); }, exitMs);
+      return () => { window.clearTimeout(timer); };
+    }
+    setMounted(true);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => { setOpened(true); });
+    });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+  }, [open, exitMs]);
+  return { mounted, opened };
 }
 
 /** Close on Escape and on pointer-down outside the anchor and panel. */
@@ -1624,10 +1695,11 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
   const panelRef = useRef(null);
   // Set by the anchoring effect: which side the panel took.
   const [placement, setPlacement] = useState('above');
+  const presence = usePanelPresence(open, PANEL_EXIT_MS);
   const close = useCallback(() => {
     setOpen(false);
   }, []);
-  useAnchoredPanel(open, anchorRef, panelRef, 6, setPlacement);
+  useAnchoredPanel(open, presence.mounted, anchorRef, panelRef, 6, setPlacement);
   useDismiss(open, anchorRef, panelRef, close);
 
   const cwd = typeof useSessions === 'function'
@@ -1742,10 +1814,16 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
           }),
         ],
       }),
-      open === true && createPortal(
+      presence.mounted === true && createPortal(
         jsx(BranchPanel, {
           panelRef,
           themeRef: anchorRef,
+          open,
+          // entered lags open by two frames on first mount (see
+          // usePanelPresence): the panel commits one closed style so the
+          // stylesheet's data-open transition has something to animate from.
+          entered: presence.opened,
+          placement,
           sessionId,
           status,
           loading,
@@ -1769,7 +1847,7 @@ function BranchPicker({ sessionId, worktree, useSessions, t }) {
 /**
  * The panel body: search, current status, worktrees, branches, create form.
  */
-function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sessionBlank, api, store, t, refresh, onClose }) {
+function BranchPanel({ panelRef, themeRef, open, entered, placement, sessionId, status, loading, cwd, sessionBlank, api, store, t, refresh, onClose }) {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(null);
   const [confirm, setConfirm] = useState(null);
@@ -1829,9 +1907,12 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
       observer?.disconnect();
     };
   }, [themeRef]);
+  // Focus rides the open state, not the mount: the portal stays mounted
+  // through the exit transition, so reopening inside that window must refocus
+  // the search field exactly like a fresh open does.
   useEffect(() => {
-    searchRef.current?.focus({ preventScroll: true });
-  }, []);
+    if (open === true) searchRef.current?.focus({ preventScroll: true });
+  }, [open]);
   useEffect(() => {
     setConfirm(null);
     setError(null);
@@ -1843,7 +1924,10 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
     const body = bodyRef.current;
     if (body === null) return;
     const frame = requestAnimationFrame(() => {
-      body.scrollTop = body.scrollHeight;
+      // Smooth scroll follows the create form expanding into view; reduced
+      // motion keeps the previous instant jump.
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      body.scrollTo({ top: body.scrollHeight, behavior: reduced ? 'auto' : 'smooth' });
     });
     return () => {
       cancelAnimationFrame(frame);
@@ -2089,6 +2173,11 @@ function BranchPanel({ panelRef, themeRef, sessionId, status, loading, cwd, sess
     role: 'dialog',
     'aria-label': t('panel.currentSection'),
     'data-testid': 'dsh-worktree-panel',
+    // data-open (the transition target, flipped in by usePanelPresence) and
+    // data-side (the direction-aware entrance offset) drive the stylesheet's
+    // open/close transition; see styles.js.
+    'data-open': entered === true ? 'true' : 'false',
+    'data-side': placement,
     style: themeVars,
     children: [
       jsxs('div', {
@@ -2639,7 +2728,8 @@ function WorktreeView({ sessionId, worktree, t }) {
       }
       // 确认块插在行下方，可能落在可视区外：滚到最近位置让用户看见。
       requestAnimationFrame(() => {
-        railRef.current?.querySelector('.dsh-wt-cf')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        railRef.current?.querySelector('.dsh-wt-cf')?.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
       });
     } catch (cause) {
       setConfirmState({ kind: 'delete-failed', branch, message: cause instanceof Error ? cause.message : String(cause) });

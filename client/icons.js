@@ -75,7 +75,7 @@ export function ChevronIcon({ direction = 'down', ...props }) {
     ...props,
     style: {
       transform: direction === 'up' ? 'rotate(180deg)' : 'rotate(0deg)',
-      transition: 'transform .12s ease',
+      transition: 'transform var(--dswt-dur-fast) var(--dswt-ease-out)',
       ...(props.style ?? {}),
     },
     children: jsx('path', { d: 'M12.78 6.22a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 7.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L8 9.94l3.72-3.72a.75.75 0 0 1 1.06 0Z' }),
