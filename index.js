@@ -51,7 +51,13 @@ const DEFAULTS = Object.freeze({
   timeoutMs: 60_000,
   graceMs: 3_000,
   maxOutputBytes: 65_536,
-  cacheTtlMs: 8_000,
+  // Structural facts (worktrees, heads, trunk, log pages) change only through
+  // mutations, which invalidate the cache explicitly, so they stay warm long
+  // enough to bridge the Client's decoration refreshes instead of expiring
+  // underneath them. Working-tree facts (`status:`, `dirty:`) drift with every
+  // edit made outside the plugin, so they keep the shorter workingTtlMs.
+  cacheTtlMs: 30_000,
+  workingTtlMs: 8_000,
   // The panel asks for one session at a time and users hop between a handful of
   // them; 256 entries keeps every recently seen checkout warm without letting a
   // long-lived Host accumulate one entry per session forever.
@@ -76,7 +82,7 @@ class GitCommandError extends Error {
 export function resolveOptions(config) {
   const raw = config ?? {};
   if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('dsh-worktree: config must be an object');
-  const known = new Set(['poolDirectory', 'gitCommand', 'timeoutMs', 'graceMs', 'maxOutputBytes', 'cacheTtlMs']);
+  const known = new Set(['poolDirectory', 'gitCommand', 'timeoutMs', 'graceMs', 'maxOutputBytes', 'cacheTtlMs', 'workingTtlMs']);
   for (const key of Object.keys(raw)) if (!known.has(key)) throw new Error(`dsh-worktree: unknown config key ${JSON.stringify(key)}`);
   const poolDirectory = raw.poolDirectory === undefined ? join(homedir(), POOL_DIRECTORY_NAME) : raw.poolDirectory;
   if (typeof poolDirectory !== 'string' || !isAbsolute(poolDirectory)) throw new Error('dsh-worktree: poolDirectory must be an absolute path');
@@ -91,6 +97,13 @@ export function resolveOptions(config) {
     const value = raw.cacheTtlMs ?? DEFAULTS.cacheTtlMs;
     if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMER_DELAY_MS) {
       throw new Error(`dsh-worktree: cacheTtlMs must be a non-negative integer no greater than ${String(MAX_TIMER_DELAY_MS)}`);
+    }
+    return value;
+  };
+  const readWorkingTtl = () => {
+    const value = raw.workingTtlMs ?? DEFAULTS.workingTtlMs;
+    if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMER_DELAY_MS) {
+      throw new Error(`dsh-worktree: workingTtlMs must be a non-negative integer no greater than ${String(MAX_TIMER_DELAY_MS)}`);
     }
     return value;
   };
@@ -110,6 +123,7 @@ export function resolveOptions(config) {
     graceMs: readPositiveInteger('graceMs'),
     maxOutputBytes: readPositiveInteger('maxOutputBytes'),
     cacheTtlMs: readCacheTtl(),
+    workingTtlMs: readWorkingTtl(),
     cacheCapacity: readCacheCapacity(),
   });
 }
@@ -659,9 +673,12 @@ export class WorktreeService {
     this.cache.delete(`session-cwd:${sessionId}`);
   }
 
-  /** Cache one computed value; mutations drop only the affected keys. */
-  async cached(key, compute) {
-    const ttl = this.options.cacheTtlMs;
+  /**
+   * Cache one computed value; mutations drop only the affected keys.
+   * @param {number} [ttlMs] - per-entry lifetime, overriding the structural default.
+   */
+  async cached(key, compute, ttlMs = this.options.cacheTtlMs) {
+    const ttl = ttlMs;
     if (ttl <= 0) return compute();
     const hit = this.cache.get(key);
     if (hit !== undefined) return hit;
@@ -865,7 +882,7 @@ export class WorktreeService {
       } catch {
         return null;
       }
-    });
+    }, this.options.workingTtlMs);
   }
 
   /**
@@ -928,47 +945,107 @@ export class WorktreeService {
    */
   async gitInfo(paths, signal) {
     const bound = this.bind(signal);
-    const items = [];
+    // One rev-parse per distinct path, deduplicated and run through a
+    // bounded worker pool instead of one-by-one: a full 64-path sidebar batch
+    // used to queue 64 serial spawns (~30ms each) behind each other.
+    const unique = [...new Set(paths)];
+    const results = new Map();
     const worktreesByRepo = new Map();
-    for (const raw of paths) {
-      bound.throwIfAborted();
-      let canonical;
-      try {
-        canonical = await this.canonical(raw, undefined, bound);
-      } catch {
-        items.push({ path: raw, isRepo: false, missing: true });
-        continue;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < unique.length) {
+        const index = cursor;
+        cursor += 1;
+        const raw = unique[index];
+        bound.throwIfAborted();
+        let canonical;
+        try {
+          canonical = await this.canonical(raw, undefined, bound);
+        } catch {
+          results.set(raw, { path: raw, isRepo: false, missing: true });
+          continue;
+        }
+        const state = await this.inspect(canonical, bound);
+        if (!state.isRepo) {
+          results.set(raw, { path: canonical, isRepo: false, ...(state.error === undefined ? {} : { error: state.error }) });
+          continue;
+        }
+        let worktrees = worktreesByRepo.get(state.repositoryRoot);
+        if (worktrees === undefined) {
+          worktrees = await this.worktreeList(state.repositoryRoot, bound);
+          worktreesByRepo.set(state.repositoryRoot, worktrees);
+        }
+        results.set(raw, {
+          path: canonical,
+          isRepo: true,
+          repositoryRoot: state.repositoryRoot,
+          branch: state.branch,
+          detached: state.detached,
+          ...this.worktreeFacts(state, worktrees),
+        });
       }
-      const state = await this.inspect(canonical, bound);
-      if (!state.isRepo) {
-        items.push({ path: canonical, isRepo: false, ...(state.error === undefined ? {} : { error: state.error }) });
-        continue;
-      }
-      let worktrees = worktreesByRepo.get(state.repositoryRoot);
-      if (worktrees === undefined) {
-        worktrees = await this.worktreeList(state.repositoryRoot, bound);
-        worktreesByRepo.set(state.repositoryRoot, worktrees);
-      }
-      items.push({
-        path: canonical,
-        isRepo: true,
-        repositoryRoot: state.repositoryRoot,
-        branch: state.branch,
-        detached: state.detached,
-        ...this.worktreeFacts(state, worktrees),
-      });
+    };
+    await Promise.all(Array.from({ length: Math.min(8, unique.length) }, () => worker()));
+    return { ok: true, items: paths.map((raw) => results.get(raw)) };
+  }
+
+  /**
+   * Branch and worktree identity of one session, and nothing else.
+   *
+   * The sidebar mark and the composer trigger need `isWorktree`, the branch,
+   * and the checkout name — facts that cost one `rev-parse` plus the cached
+   * worktree list and never touch a working tree. `status` answers those too,
+   * but pays for branch listings, trunk resolution, lineage and dirty counts;
+   * one mark per sidebar row at that price is what made the sidebar hot.
+   * Failure shapes match `status` (`session-unavailable`,
+   * `recorded-checkout-missing`), so the same UI branches work.
+   * @param {string} sessionId - session whose checkout is identified.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns checkout identity of the session, or a structured failure.
+   */
+  async checkoutFacts(sessionId, signal) {
+    const bound = this.bind(signal);
+    const checkout = await this.checkoutOf(sessionId, bound);
+    if (checkout.ok === false) return checkout;
+    let cwd = checkout.cwd;
+    try {
+      cwd = await this.canonical(cwd, undefined, bound);
+    } catch {
+      /* A missing directory still reports structured, not thrown. */
     }
-    return { ok: true, items };
+    const state = await this.inspect(cwd, bound);
+    if (!state.isRepo) {
+      return { ok: true, sessionId, cwd, isRepo: false, ...(state.error === undefined ? {} : { error: state.error }) };
+    }
+    const worktrees = await this.worktreeList(state.repositoryRoot, bound);
+    return {
+      ok: true,
+      sessionId,
+      cwd,
+      isRepo: true,
+      repositoryRoot: state.repositoryRoot,
+      branch: state.branch,
+      detached: state.detached,
+      ...this.worktreeFacts(state, worktrees),
+    };
   }
 
   /**
    * Full branch/worktree panel snapshot for one session.
-   * @param {string} sessionId - session whose checkout is inspected.
+   *
+   * `request` is the bare session id, or `{ sessionId, dirty }` where
+   * `dirty` is `'current'` (default) or `'all'`. Pool-wide dirty counts
+   * walk every pool worktree with its own `git status`, so only the tab view
+   * — whose rack shows a dirty LED per card — asks for `'all'`; the sidebar
+   * marks and the composer trigger never do.
+   * @param {string | { sessionId: string, dirty?: 'current' | 'all' }} request - session, optionally with a dirty scope.
    * @param {AbortSignal} signal - operation cancellation.
    * @returns current checkout, branch directory, worktrees, and the pool path.
    */
-  async status(sessionId, signal) {
+  async status(request, signal) {
     const bound = this.bind(signal);
+    const sessionId = typeof request === 'string' ? request : String(request?.sessionId ?? '');
+    const dirtyScope = typeof request === 'object' && request !== null && request.dirty === 'all' ? 'all' : 'current';
     const checkout = await this.checkoutOf(sessionId, bound);
     if (checkout.ok === false) return checkout;
     const poolPath = this.options.poolDirectory;
@@ -995,7 +1072,7 @@ export class WorktreeService {
       this.cached(`status:${cwd}`, async () => this.git(cwd, ['status', '--porcelain=v1', '--branch', '--untracked-files=normal'], { signal: bound }).catch((error) => {
         if (error instanceof GitCommandError) return null;
         throw error;
-      })),
+      }), this.options.workingTtlMs),
       this.worktreeList(state.repositoryRoot, bound),
       this.cached(`heads:${state.repositoryRoot}`, async () => this.git(state.repositoryRoot, ['for-each-ref', '--format=%(refname:short)%09%(upstream:short)', 'refs/heads'], { signal: bound })),
     ]);
@@ -1082,12 +1159,19 @@ export class WorktreeService {
       locked: entry.locked,
       isCurrent: samePath(entry.path, currentWorktreePath),
     }));
-    // Dirty counts run in parallel and only for checkouts the panel shows.
-    const dirtyTargets = poolEntries.filter((entry) => entry.inPool || entry.isCurrent === true);
+    // The current checkout's dirty count is already in hand: the branch
+    // header above ran the same `git status`. Pool-wide dirty counts walk
+    // every pool worktree, so only callers that pass `dirty: 'all'` pay for
+    // them; every other seat reads the current count only.
+    const dirtyTargets = dirtyScope === 'all'
+      ? poolEntries.filter((entry) => entry.inPool === true && entry.isCurrent !== true)
+      : [];
     const dirtyResults = await Promise.all(dirtyTargets.map((entry) => this.dirtyCountOf(entry.path, bound)));
     dirtyTargets.forEach((entry, index) => {
       entry.dirtyCount = dirtyResults[index];
     });
+    const currentEntry = poolEntries.find((entry) => entry.isCurrent === true);
+    if (currentEntry !== undefined) currentEntry.dirtyCount = status.dirtyCount;
     return {
       ok: true,
       sessionId,
@@ -1159,14 +1243,27 @@ export class WorktreeService {
     const { cwd } = checkout;
     const state = await this.inspect(cwd, bound);
     if (!state.isRepo) return failure('not-a-repo', 'This session directory is not a Git repository.', { cwd });
-    const exists = await this.git(state.repositoryRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${name}`], { signal: bound, allowedExitCodes: [0, 1] });
-    if (exists.exitCode === 0) return failure('branch-exists', `Branch ${name} already exists.`, { branch: name, hint: 'Pick another name, or switch to the existing branch from the list.' });
-    const worktrees = await this.worktreeList(state.repositoryRoot, bound);
+    // Existence, occupancy and dirtiness in one parallel round: the checks are
+    // evaluated in the same order below, but the processes no longer queue
+    // behind each other on every spawn's ~30ms fixed cost.
+    const [existsRefs, worktrees, statusResult] = await Promise.all([
+      this.exactRefs(state.repositoryRoot, [`refs/heads/${name}`], bound),
+      this.worktreeList(state.repositoryRoot, bound),
+      // A fresh read, deliberately uncached: the dirty-consent decision must
+      // see the working tree as it is now, not as of the last panel read.
+      this.git(cwd, ['status', '--porcelain=v1', '--branch', '--untracked-files=normal'], { signal: bound }).catch((error) => {
+        if (error instanceof GitCommandError) return null;
+        throw error;
+      }),
+    ]);
+    if (existsRefs.has(`refs/heads/${name}`) === true) return failure('branch-exists', `Branch ${name} already exists.`, { branch: name, hint: 'Pick another name, or switch to the existing branch from the list.' });
     const occupied = worktrees.find((worktree) => worktree.branch === name);
     if (occupied !== undefined) {
       return failure('branch-occupied', `Branch ${name} is already checked out in another worktree.`, { branch: name, occupiedPath: occupied.path, hint: 'Open that worktree, or pick another name.' });
     }
-    const statusResult = await this.git(cwd, ['status', '--porcelain=v1', '--branch', '--untracked-files=normal'], { signal: bound });
+    if (statusResult === null) {
+      return failure('switch-failed', 'Git could not read the working tree status.', { branch: name });
+    }
     const status = parseStatus(statusResult.stdout);
     if (status.dirtyCount > 0 && request.allowDirty !== true) {
       return failure('dirty-tree', `The working tree has ${String(status.dirtyCount)} uncommitted change(s).`, {
@@ -1207,36 +1304,53 @@ export class WorktreeService {
     const { cwd } = checkout;
     const state = await this.inspect(cwd, bound);
     if (!state.isRepo) return failure('not-a-repo', 'This session directory is not a Git repository.', { cwd });
-    const worktrees = await this.worktreeList(state.repositoryRoot, bound);
+    const target = request.branch;
+    // Every fact the decision reads arrives in one parallel round: the ref
+    // probe answers local, remote, and short-name existence in a single
+    // `for-each-ref`, the worktree list and the branch header were serial
+    // probes before, and each process spawn costs ~30ms on Windows.
+    const [refs, worktrees, statusResult] = await Promise.all([
+      this.exactRefs(state.repositoryRoot, [
+        `refs/heads/${target}`,
+        `refs/remotes/${target}`,
+        ...(target.indexOf('/') > 0 ? [`refs/heads/${target.slice(target.indexOf('/') + 1)}`] : []),
+      ], bound),
+      this.worktreeList(state.repositoryRoot, bound),
+      // A fresh read, deliberately uncached: the dirty-consent decision must
+      // see the working tree as it is now, not as of the last panel read.
+      this.git(cwd, ['status', '--porcelain=v1', '--branch', '--untracked-files=normal'], { signal: bound }).catch((error) => {
+        if (error instanceof GitCommandError) return null;
+        throw error;
+      }),
+    ]);
     const facts = this.worktreeFacts(state, worktrees);
     const currentWorktreePath = facts.worktreePath ?? state.repositoryRoot;
-    const target = request.branch;
-    const hasRef = async (ref) => {
-      const result = await this.git(state.repositoryRoot, ['show-ref', '--verify', '--quiet', ref], { signal: bound, allowedExitCodes: [0, 1] });
-      return result.exitCode === 0;
-    };
     const slash = target.indexOf('/');
+    const short = slash > 0 ? target.slice(slash + 1) : null;
     let branch = target;
     let remoteTracking = null;
-    if ((await hasRef(`refs/heads/${target}`)) === false && slash > 0) {
-      const short = target.slice(slash + 1);
-      if (await hasRef(`refs/remotes/${target}`)) {
-        if (await hasRef(`refs/heads/${short}`)) branch = short;
-        else {
-          branch = short;
-          remoteTracking = target;
-        }
+    if (refs.has(`refs/heads/${target}`) !== true && short !== null) {
+      if (refs.has(`refs/remotes/${target}`) === true) {
+        // The remote spelling wins the family; a same-named local short branch
+        // switches in place instead of creating a duplicate tracking branch.
+        branch = short;
+        remoteTracking = refs.has(`refs/heads/${short}`) === true ? null : target;
       }
-    } else if ((await hasRef(`refs/heads/${target}`)) === false) {
-      const candidates = (await this.remoteNames(state.repositoryRoot, bound)).map((remote) => `${remote}/${target}`);
-      const match = [];
-      for (const candidate of candidates) if (await hasRef(`refs/remotes/${candidate}`)) match.push(candidate);
+      // No remote under that spelling either: Git itself refuses the switch,
+      // exactly like the show-ref chain did before.
+    } else if (refs.has(`refs/heads/${target}`) !== true) {
+      const match = [...refs]
+        .filter((ref) => ref.startsWith('refs/remotes/') === true)
+        .map((ref) => ref.slice('refs/remotes/'.length))
+        .sort();
       if (match.length === 0) return failure('branch-not-found', `Branch ${target} does not exist locally or on any remote.`, { branch: target });
       if (match.length > 1) return failure('branch-ambiguous', `Branch ${target} exists on several remotes: ${match.join(', ')}.`, { branch: target, candidates: match });
       branch = target;
       remoteTracking = match[0];
     }
-    const statusResult = await this.git(cwd, ['status', '--porcelain=v1', '--branch', '--untracked-files=normal'], { signal: bound });
+    if (statusResult === null) {
+      return failure('switch-failed', 'Git could not read the working tree status.', { branch: target });
+    }
     const status = parseStatus(statusResult.stdout);
     const dirtyCount = status.dirtyCount;
     if (status.branch === branch && !state.detached) {
@@ -1304,6 +1418,32 @@ export class WorktreeService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Which of a set of fully spelled refs exist, answered in one Git process.
+   *
+   * Replacing a chain of serial `show-ref --verify` probes (one process each,
+   * ~30ms apiece on Windows) matters on the switch path: local, remote, and
+   * short-name existence all arrive together. `for-each-ref` patterns also
+   * match refs *below* the pattern (`refs/remotes/feat` matches
+   * `refs/remotes/feat/x`), while switch decisions need exact existence, so
+   * matches are filtered down to the requested spellings.
+   * @param {string} repositoryRoot - main checkout of the repository.
+   * @param {string[]} candidates - fully spelled refs to probe.
+   * @param {AbortSignal} signal - operation cancellation.
+   * @returns the subset of candidates that exists.
+   */
+  async exactRefs(repositoryRoot, candidates, signal) {
+    const unique = [...new Set(candidates)];
+    const found = new Set();
+    if (unique.length === 0) return found;
+    const { stdout } = await this.git(repositoryRoot, ['for-each-ref', '--format=%(refname)', ...unique], { signal });
+    for (const line of stdout.split('\n')) {
+      const name = line.trim();
+      if (name.length > 0 && unique.includes(name)) found.add(name);
+    }
+    return found;
   }
 
   /**

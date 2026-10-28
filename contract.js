@@ -133,6 +133,24 @@ function parseCreateRequest(value) {
   };
 }
 
+/**
+ * `sessionId: string` or `{ sessionId, dirty?: 'current' | 'all' }` — the panel
+ * snapshot. `dirty` scopes the pool-wide dirty counts: only the tab view,
+ * whose rack shows a dirty LED per worktree card, passes `'all'`.
+ */
+function parseStatusRequest(value) {
+  if (typeof value === 'string') {
+    nonEmptyString(value, 'sessionId');
+    return value;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('sessionId must be a non-empty string');
+  const sessionId = nonEmptyString(value.sessionId, 'request.sessionId');
+  if (value.dirty !== undefined && value.dirty !== 'current' && value.dirty !== 'all') {
+    throw new Error('request.dirty must be "current" or "all"');
+  }
+  return value.dirty === undefined ? { sessionId } : { sessionId, dirty: value.dirty };
+}
+
 /** `request: { sessionId, path }` — move the session into a checkout. */
 function parseEnterRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request must be an object');
@@ -222,7 +240,9 @@ function param(name, parse, description) {
 export const DESCRIPTORS = Object.freeze([
   method('gitInfo', param('paths', parsePaths, 'checkout paths whose branch and worktree identity are required'),
     resultCodec('GitInfoValue', 'one state per requested path, in request order')),
-  method('status', param('sessionId', parseSessionId, 'session whose checkout is inspected'),
+  method('checkoutFacts', param('sessionId', parseSessionId, 'session whose checkout identity is required'),
+    resultCodec('CheckoutFactsValue', 'branch and worktree identity of one session checkout, without listings or dirty counts')),
+  method('status', param('sessionId', parseStatusRequest, 'session whose checkout is inspected, optionally with a dirty scope'),
     resultCodec('GitStatusValue', 'current checkout, branches, and worktrees of the session repository')),
   method('switchBranch', param('request', parseSwitchRequest, 'session, target branch, and dirty-tree consent'),
     resultCodec('SwitchBranchValue', 'switch outcome or a structured state that needs a user decision')),

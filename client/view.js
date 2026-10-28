@@ -9,7 +9,7 @@
  * next step, and the confirm block is that answer rendered in place.
  * @module dsh-worktree/client/view
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { jsx, jsxs } from 'react/jsx-runtime';
 import { layoutCommits, countLanes } from './graph-layout.js';
 import { BranchIcon, CheckIcon, PlusIcon, RemoteBranchIcon, SpinnerIcon, TrashIcon, WarningIcon, WorktreeIcon } from './icons.js';
@@ -29,6 +29,22 @@ const tabBaseName = (path) => {
   return slash < 0 ? text : text.slice(slash + 1);
 };
 
+/**
+ * One shared relative-time formatter.
+ *
+ * `Intl.RelativeTimeFormat` construction is ~40x the cost of `format` on a
+ * page of 200 rows, and the old per-call construction rebuilt it for every
+ * row on every render (typing, arrow keys, unrelated store publishes). The
+ * locale seat is always `undefined`, so one instance is behaviour-identical.
+ */
+const relativeFormatter = (() => {
+  try {
+    return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  } catch {
+    return null;
+  }
+})();
+
 /** Shared relative-time formatter; the active locale decides the wording. */
 const tabRelative = (at) => {
   if (typeof at !== 'number' || at <= 0) return '';
@@ -42,11 +58,77 @@ const tabRelative = (at) => {
     unit = nextUnit;
   }
   try {
-    return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(value, unit);
+    return relativeFormatter === null
+      ? new Date(at * 1000).toLocaleDateString()
+      : relativeFormatter.format(value, unit);
   } catch {
     return new Date(at * 1000).toLocaleDateString();
   }
 };
+
+/** SVG parts of one graph row: pass-through lines, bends, and the node dot. */
+function rowSvg(row) {
+  const parts = [];
+  for (const lane of row.pass) {
+    parts.push(jsx('line', { x1: tabLaneX(lane), y1: 0, x2: tabLaneX(lane), y2: ROW_H, className: tabLaneClass(lane) }, 'p' + lane));
+  }
+  for (const lane of row.incoming) {
+    parts.push(jsx('path', { d: tabElbow(lane, row.lane, 0, NODE_Y - 5), className: tabLaneClass(lane), fill: 'none' }, 'i' + lane));
+  }
+  if (row.laneTop === true) {
+    parts.push(jsx('line', { x1: tabLaneX(row.lane), y1: 0, x2: tabLaneX(row.lane), y2: NODE_Y - 5, className: tabLaneClass(row.lane) }, 't'));
+  }
+  row.outgoing.forEach((edge, index) => {
+    if (edge.kind === 'continue') {
+      parts.push(jsx('line', { x1: tabLaneX(edge.lane), y1: NODE_Y + 4, x2: tabLaneX(edge.lane), y2: ROW_H, className: tabLaneClass(edge.lane) }, 'o' + index));
+    } else {
+      parts.push(jsx('path', { d: tabElbow(row.lane, edge.lane, NODE_Y + 4, ROW_H), className: tabLaneClass(edge.lane), fill: 'none' }, 'o' + index));
+    }
+  });
+  // The commit node itself: a lane-coloured dot with a page-background halo,
+  // so passing lines appear to pass *behind* it instead of through it.
+  parts.push(jsx('circle', {
+    cx: tabLaneX(row.lane),
+    cy: NODE_Y,
+    r: row.commit.head === true ? 4.4 : 3.4,
+    className: tabLaneClass(row.lane) + ' dsh-wt-node',
+  }, 'node'));
+  return parts;
+}
+
+/**
+ * One commit row: lane SVG, subject with refs, short hash, relative time.
+ *
+ * Memoized: before it existed as an inline block, so selection, typing in the
+ * create form, toasts and unrelated store publishes each rebuilt and
+ * reconciled the whole 200-row page; now only rows whose props changed
+ * re-render.
+ */
+const GraphRow = memo(function GraphRow({ row, index, laneWidth, selected, onToggle }) {
+  const commit = row.commit;
+  return jsxs('div', {
+    className: 'dsh-wt-crow' + (selected === true ? ' dsh-wt-crow-sel' : ''),
+    role: 'button',
+    tabIndex: -1,
+    onClick: () => { onToggle(index); },
+    children: [
+      jsxs('div', { className: 'dsh-wt-crow-lane', style: { width: laneWidth + 'px' }, children: [
+        jsx('svg', { width: laneWidth, height: ROW_H, 'aria-hidden': true, children: rowSvg(row) }),
+        commit.head === true && jsx('span', { className: 'dsh-wt-node-ring', style: { left: tabLaneX(row.lane) + 'px' }, 'data-lane': row.lane % 4 }),
+      ] }),
+      jsxs('div', { className: 'dsh-wt-topic', children: [
+        jsx('span', { className: 'dsh-wt-subj', children: commit.subject }),
+        commit.refs.map((ref, refIndex) => jsx('span', {
+          className: 'dsh-wt-ref',
+          'data-kind': ref.kind,
+          children: ref.kind === 'head' ? (ref.name == null ? 'HEAD' : 'HEAD → ' + ref.name) : ref.name,
+        }, refIndex)),
+        jsx('span', { className: 'dsh-wt-hash', children: commit.short }),
+      ] }),
+      jsx('span', { className: 'dsh-wt-when', children: tabRelative(commit.at) }),
+    ],
+  });
+});
 
 /**
  * The worktree tab view.
@@ -82,12 +164,14 @@ export function WorktreeView({ sessionId, worktree, t }) {
     if (sessionId === undefined || api === undefined) return;
     setLoading(true);
     try {
-      const value = await api.status(sessionId);
+      // The rack shows a dirty LED per worktree card, so this view is the one
+      // seat that asks for pool-wide dirty counts.
+      const value = await api.status(sessionId, { dirty: 'all' });
       if (value.ok === false && value.code === 'session-unavailable') {
         setStatus(undefined);
         for (const delay of [400, 800, 1600]) {
           await new Promise((resolve) => { setTimeout(resolve, delay); });
-          const retry = await api.status(sessionId);
+          const retry = await api.status(sessionId, { dirty: 'all' });
           if (retry.ok === true) { setStatus(retry); break; }
         }
       } else {
@@ -120,13 +204,23 @@ export function WorktreeView({ sessionId, worktree, t }) {
 
   // The store is the shared source of truth: the picker moving this session (or
   // any mutation elsewhere) republishes, and the tab follows without polling.
+  // The cache holds light checkout facts now, so a change that matters triggers
+  // one full snapshot; routine refreshes of unchanged facts no longer rebuild
+  // the whole graph page.
   useEffect(() => {
     if (sessionId === undefined || store === undefined) return undefined;
+    const signatureOf = (value) => value === undefined
+      ? ''
+      : [value.cwd, value.branch, value.isWorktree, value.worktreeName, value.code ?? ''].join('|');
+    let last = signatureOf(store.currentSessionOf(sessionId));
     return store.subscribe(() => {
-      const fresh = store.currentSessionOf(sessionId);
-      if (fresh !== undefined) setStatus(fresh);
+      const next = signatureOf(store.currentSessionOf(sessionId));
+      if (next === last) return;
+      last = next;
+      void refresh();
+      void refreshLog();
     });
-  }, [store, sessionId]);
+  }, [store, sessionId, refresh, refreshLog]);
 
   const afterMutation = useCallback((message) => {
     if (store !== undefined) store.invalidate();
@@ -285,7 +379,7 @@ export function WorktreeView({ sessionId, worktree, t }) {
         if (menuBranch !== null) { setMenuBranch(null); return; }
         if (confirmState !== null) { setConfirmState(null); return; }
         if (createOpen) { closeCreate(); return; }
-        if (selected >= 0) setSelected(-1);
+        setSelected((current) => (current >= 0 ? -1 : current));
         return;
       }
       if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
@@ -299,7 +393,9 @@ export function WorktreeView({ sessionId, worktree, t }) {
     };
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); };
-  }, [menuBranch, confirmState, createOpen, selected, rows.length, closeCreate]);
+    // `selected` reads through the functional update above, so arrow-key
+    // navigation no longer rebinds the document listener on every step.
+  }, [menuBranch, confirmState, createOpen, rows.length, closeCreate]);
 
   // Clicking anything outside the open menu closes it.
   useEffect(() => {
@@ -362,62 +458,21 @@ export function WorktreeView({ sessionId, worktree, t }) {
 
   // --- commit graph --------------------------------------------------------
 
-  const rowSvg = (row) => {
-    const parts = [];
-    for (const lane of row.pass) {
-      parts.push(jsx('line', { x1: tabLaneX(lane), y1: 0, x2: tabLaneX(lane), y2: ROW_H, className: tabLaneClass(lane) }, 'p' + lane));
-    }
-    for (const lane of row.incoming) {
-      parts.push(jsx('path', { d: tabElbow(lane, row.lane, 0, NODE_Y - 5), className: tabLaneClass(lane), fill: 'none' }, 'i' + lane));
-    }
-    if (row.laneTop === true) {
-      parts.push(jsx('line', { x1: tabLaneX(row.lane), y1: 0, x2: tabLaneX(row.lane), y2: NODE_Y - 5, className: tabLaneClass(row.lane) }, 't'));
-    }
-    row.outgoing.forEach((edge, index) => {
-      if (edge.kind === 'continue') {
-        parts.push(jsx('line', { x1: tabLaneX(edge.lane), y1: NODE_Y + 4, x2: tabLaneX(edge.lane), y2: ROW_H, className: tabLaneClass(edge.lane) }, 'o' + index));
-      } else {
-        parts.push(jsx('path', { d: tabElbow(row.lane, edge.lane, NODE_Y + 4, ROW_H), className: tabLaneClass(edge.lane), fill: 'none' }, 'o' + index));
-      }
-    });
-    // The commit node itself: a lane-coloured dot with a page-background halo,
-    // so passing lines appear to pass *behind* it instead of through it.
-    parts.push(jsx('circle', {
-      cx: tabLaneX(row.lane),
-      cy: NODE_Y,
-      r: row.commit.head === true ? 4.4 : 3.4,
-      className: tabLaneClass(row.lane) + ' dsh-wt-node',
-    }, 'node'));
-    return parts;
-  };
-
-  const graphChildren = [];
-  rows.forEach((row, index) => {
-    const commit = row.commit;
-    const isSelected = index === selected;
-    graphChildren.push(jsxs('div', {
-      className: 'dsh-wt-crow' + (isSelected ? ' dsh-wt-crow-sel' : ''),
-      role: 'button',
-      tabIndex: -1,
-      onClick: () => { setSelected(index === selected ? -1 : index); },
-      children: [
-        jsxs('div', { className: 'dsh-wt-crow-lane', style: { width: laneWidth + 'px' }, children: [
-          jsx('svg', { width: laneWidth, height: ROW_H, 'aria-hidden': true, children: rowSvg(row) }),
-          commit.head === true && jsx('span', { className: 'dsh-wt-node-ring', style: { left: tabLaneX(row.lane) + 'px' }, 'data-lane': row.lane % 4 }),
-        ] }),
-        jsxs('div', { className: 'dsh-wt-topic', children: [
-          jsx('span', { className: 'dsh-wt-subj', children: commit.subject }),
-          commit.refs.map((ref, refIndex) => jsx('span', {
-            className: 'dsh-wt-ref',
-            'data-kind': ref.kind,
-            children: ref.kind === 'head' ? (ref.name == null ? 'HEAD' : 'HEAD → ' + ref.name) : ref.name,
-          }, refIndex)),
-          jsx('span', { className: 'dsh-wt-hash', children: commit.short }),
-        ] }),
-        jsx('span', { className: 'dsh-wt-when', children: tabRelative(commit.at) }),
-      ],
-    }, commit.hash));
-  });
+  // Selection toggles through one stable callback so the memoized GraphRow
+  // instances below only re-render for the two rows whose selection changed.
+  const onToggleRow = useCallback((index) => {
+    setSelected((current) => (current === index ? -1 : index));
+  }, []);
+  const graphChildren = useMemo(
+    () => rows.map((row, index) => jsx(GraphRow, {
+      row,
+      index,
+      laneWidth,
+      selected: index === selected,
+      onToggle: onToggleRow,
+    }, row.commit.hash)),
+    [rows, laneWidth, selected, onToggleRow],
+  );
 
   const graph = jsxs('div', { className: 'dsh-wt-pane', children: [
     jsxs('div', { className: 'dsh-wt-pane-head', children: [

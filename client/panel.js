@@ -219,15 +219,24 @@ export function BranchPicker({ sessionId, worktree, useSessions, t }) {
   }, [refresh]);
   // The framework's session summary keeps reporting the directory the session
   // started in, even after the plugin moves it into a worktree, so it cannot
-  // drive a refresh. The store's session cache is the shared source of truth and
-  // is invalidated explicitly when this plugin changes a checkout.
+  // drive a refresh. The store's session cache is the shared source of truth
+  // and is invalidated explicitly when this plugin changes a checkout. The
+  // cache now holds the light checkout facts, so a change that matters (the
+  // directory, the branch, the checkout identity) triggers one full snapshot;
+  // routine refreshes of unchanged facts no longer re-render this picker.
   useEffect(() => {
     if (sessionId === undefined) return undefined;
+    const signatureOf = (value) => value === undefined
+      ? ''
+      : [value.cwd, value.branch, value.isWorktree, value.worktreeName, value.code ?? ''].join('|');
+    let last = signatureOf(worktree.store.currentSessionOf(sessionId));
     return worktree.store.subscribe(() => {
-      const fresh = worktree.store.currentSessionOf(sessionId);
-      if (fresh !== undefined) setStatus(fresh);
+      const next = signatureOf(worktree.store.currentSessionOf(sessionId));
+      if (next === last) return;
+      last = next;
+      void refresh();
     });
-  }, [worktree.store, sessionId]);
+  }, [worktree.store, sessionId, refresh]);
 
   // Nothing to offer outside a repository, and no useful state to report: the
   // trigger is the branch entry point, so it is hidden entirely rather than shown

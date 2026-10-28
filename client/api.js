@@ -74,8 +74,17 @@ export function createWorktreeApi(ctx) {
     /** Batched branch/worktree identity of checkout paths. */
     gitInfo: (paths) => call('gitInfo', paths),
 
-    /** Full panel snapshot of one session's repository. */
-    status: (sessionId) => call('status', sessionId),
+    /** Light checkout identity of one session: no listings, no dirty counts. */
+    checkoutFacts: (sessionId) => call('checkoutFacts', sessionId),
+
+    /**
+     * Full panel snapshot of one session's repository.
+     * @param {string} sessionId - session to inspect.
+     * @param {{ dirty?: 'current' | 'all' }} [options] - pool-wide dirty counts
+     * walk every pool worktree with its own `git status`; only the tab view,
+     * which shows a dirty LED per worktree card, should ask for `'all'`.
+     */
+    status: (sessionId, options) => call('status', options === undefined || options.dirty === undefined ? sessionId : { sessionId, dirty: options.dirty }),
 
     /** In-place branch switch with structured state outcomes. */
     switchBranch: (request) => call('switchBranch', request),
@@ -180,10 +189,16 @@ export function createWorktreeApi(ctx) {
      */
     async moveWithRetry(sessionId, path) {
       let last = { ok: false, message: 'session never became available' };
-      for (const delay of [150, 300, 600, 1200, 2000]) {
-        await new Promise((resolve) => {
-          setTimeout(resolve, delay);
-        });
+      // Attempt first, wait between retries: an agent that is already up (the
+      // common case when revealing an existing checkout) answers without any
+      // artificial delay, while a freshly created session still gets the same
+      // backoff ladder while its agent boots.
+      for (const delay of [0, 150, 300, 600, 1200, 2000]) {
+        if (delay > 0) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, delay);
+          });
+        }
         // Raw remote call: `call()` throws on failure, but this loop needs the
         // result object to tell a transient "not open yet" from a real error.
         const result = await remoteOf().enterWorktree({ sessionId, path });
@@ -219,7 +234,11 @@ export function createWorktreeApi(ctx) {
  * @module dsh-worktree/client/store
  */
 export class GitInfoStore {
-  constructor(api, { ttlMs = 15000, flushDelayMs = 40, sessionTtlMs = 15000 } = {}) {
+  // sessionTtlMs stays under the Host's structural cacheTtlMs (30s): a refresh
+  // wave that arrives while the Host's inspect/worktree facts are still warm
+  // costs zero Git processes, so the idle-sidebar poll degenerates from one
+  // full Git fan-out per wave into cache reads.
+  constructor(api, { ttlMs = 15000, flushDelayMs = 40, sessionTtlMs = 25000 } = {}) {
     this.api = api;
     this.ttlMs = ttlMs;
     this.flushDelayMs = flushDelayMs;
@@ -272,13 +291,21 @@ export class GitInfoStore {
     this.requestSession(sessionId);
   }
 
-  /** Ask the plugin for one session's checkout facts, deduplicated and cached. */
+  /**
+   * Ask the plugin for one session's checkout facts, deduplicated and cached.
+   *
+   * The light `checkoutFacts` endpoint answers everything a sidebar mark or a
+   * trigger needs (isWorktree, branch, checkout name) with one rev-parse and
+   * the cached worktree list; the full `status` snapshot it replaced walked
+   * the working tree of every pool worktree once per row, which is what made
+   * an idle sidebar keep the Host's Git processes busy.
+   */
   requestSession(sessionId) {
     const entry = this.sessions.get(sessionId);
     if (entry !== undefined && entry.expires > Date.now()) return;
     if (entry !== undefined && entry.inflight === true) return;
     this.sessions.set(sessionId, { value: entry?.value, expires: Date.now() + 1000, inflight: true });
-    this.api.status(sessionId)
+    this.api.checkoutFacts(sessionId)
       .then((value) => {
         this.sessions.set(sessionId, { value, expires: Date.now() + this.sessionTtlMs, inflight: false });
         this.version += 1;

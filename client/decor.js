@@ -28,10 +28,21 @@ function useGitInfo(store, path) {
   return snap;
 }
 
-/** Subscribe one session to the store's session-scoped facts. */
+/**
+ * Subscribe one session to the store's session-scoped facts.
+ *
+ * The first paint answers `undefined` on purpose: asking the store during
+ * render is a side effect (a network fetch fired from the render phase), so
+ * the row paints from the directory fallback and the effect fetches the
+ * session facts one tick later.
+ */
 function useSessionInfo(store, sessionId) {
-  const [snap, setSnap] = useState(() => store.currentSessionOf(sessionId));
+  const [snap, setSnap] = useState(undefined);
   useEffect(() => {
+    if (sessionId === undefined) {
+      setSnap(undefined);
+      return undefined;
+    }
     setSnap(store.currentSessionOf(sessionId));
     return store.subscribe(() => {
       setSnap(store.currentSessionOf(sessionId));

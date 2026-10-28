@@ -50,7 +50,7 @@ const entry = `window.__ModuleLoader__.load({
   id: 'dsh-worktree',
   factory(require) {
     /** Baseline runtime imports resolved by the module table. */
-    const { useState, useEffect, useCallback, useMemo, useRef } = require('react');
+    const { useState, useEffect, useCallback, useMemo, useRef, memo } = require('react');
     const { jsx, jsxs, Fragment } = require('react/jsx-runtime');
     const { createPortal } = require('react-dom');
 
